@@ -1,0 +1,97 @@
+import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+
+export const userRole = pgEnum("user_role", ["admin", "teacher"]);
+
+export const users = pgTable("users", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  username: varchar("username", { length: 80 }).notNull().unique(),
+  displayName: varchar("display_name", { length: 160 }).notNull(),
+  passwordHash: text("password_hash").notNull(),
+  role: userRole("role").notNull().default("teacher"),
+  status: varchar("status", { length: 16 }).notNull().default("active"),
+  language: varchar("language", { length: 8 }).notNull().default("vi"),
+  theme: varchar("theme", { length: 8 }).notNull().default("light"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const sessions = pgTable("sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const quizzes = pgTable("quizzes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  teacherId: uuid("teacher_id").notNull().references(() => users.id),
+  title: varchar("title", { length: 200 }).notNull(),
+  description: text("description").notNull().default(""),
+  promptText: text("prompt_text").notNull().default(""),
+  promptImages: jsonb("prompt_images").$type<PromptImage[]>().notNull().default([]),
+  status: varchar("status", { length: 16 }).notNull().default("active"),
+  durationMinutes: integer("duration_minutes").notNull(),
+  linkExpiresAt: timestamp("link_expires_at", { withTimezone: true }),
+  linkToken: varchar("link_token", { length: 64 }).notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const questions = pgTable("questions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  quizId: uuid("quiz_id").notNull().references(() => quizzes.id, { onDelete: "cascade" }),
+  position: integer("position").notNull(),
+  type: varchar("type", { length: 16 }).notNull(),
+  prompt: text("prompt").notNull(),
+  options: jsonb("options").$type<string[]>().notNull().default([]),
+  correctOption: integer("correct_option"),
+  points: integer("points").notNull().default(1),
+});
+
+export const submissions = pgTable("submissions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  quizId: uuid("quiz_id").notNull().references(() => quizzes.id),
+  studentName: varchar("student_name", { length: 160 }).notNull(),
+  studentClass: varchar("student_class", { length: 80 }).notNull(),
+  studentNameKey: varchar("student_name_key", { length: 160 }).notNull(),
+  studentClassKey: varchar("student_class_key", { length: 80 }).notNull(),
+  resumeTokenHash: varchar("resume_token_hash", { length: 64 }).notNull().unique(),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  score: integer("score"),
+  gradingStatus: varchar("grading_status", { length: 16 }).notNull().default("pending"),
+  questionSnapshot: jsonb("question_snapshot").$type<QuestionSnapshot[]>().notNull(),
+  promptSnapshot: jsonb("prompt_snapshot").$type<{ text: string; images: PromptImage[] }>(),
+}, (table) => [uniqueIndex("submission_quiz_student_identity").on(table.quizId, table.studentNameKey, table.studentClassKey)]);
+
+export type PromptImage = { id: string; alt: string };
+
+export const quizAssets = pgTable("quiz_assets", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  uploadedBy: uuid("uploaded_by").notNull().references(() => users.id),
+  mimeType: varchar("mime_type", { length: 20 }).notNull(),
+  size: integer("size").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type QuestionSnapshot = {
+  id: string;
+  position: number;
+  type: "choice" | "essay";
+  prompt: string;
+  options: string[];
+  correctOption: number | null;
+  points: number;
+};
+
+export const answers = pgTable("answers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  submissionId: uuid("submission_id").notNull().references(() => submissions.id, { onDelete: "cascade" }),
+  questionId: uuid("question_id").notNull(),
+  answer: text("answer"),
+  awardedPoints: integer("awarded_points"),
+  isCorrect: boolean("is_correct"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex("answer_submission_question").on(table.submissionId, table.questionId)]);

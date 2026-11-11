@@ -1,0 +1,12 @@
+.git
+.next
+node_modules
+quiz-be/uploads
+**/node_modules
+**/dist
+**/.next
+.env
+.env.*
+!.env.example
+*.log
+coverage

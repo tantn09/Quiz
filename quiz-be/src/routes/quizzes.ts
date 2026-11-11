@@ -1,0 +1,132 @@
+import { randomBytes } from "node:crypto";
+import type { FastifyInstance } from "fastify";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import { z } from "zod";
+import { requireTeacherAccess } from "../auth.js";
+import { db } from "../db/index.js";
+import { questions, quizzes, submissions, quizAssets, type PromptImage } from "../db/schema.js";
+
+const questionInput = z.object({
+  type: z.enum(["choice", "essay"]),
+  prompt: z.string().trim().min(1).max(5000),
+  options: z.array(z.string().trim().min(1).max(500)).max(8).default([]),
+  correctOption: z.number().int().min(0).nullable().default(null),
+  points: z.number().int().min(0).max(1000).default(1),
+}).superRefine((question, context) => {
+  if (question.type === "choice" && (question.options.length < 2 || question.correctOption === null || question.correctOption >= question.options.length)) {
+    context.addIssue({ code: "custom", message: "Câu trắc nghiệm cần ít nhất hai lựa chọn và đáp án đúng hợp lệ." });
+  }
+  if (question.type === "essay" && (question.options.length > 0 || question.correctOption !== null)) {
+    context.addIssue({ code: "custom", message: "Câu tự luận không có lựa chọn hoặc đáp án đúng." });
+  }
+});
+
+export const quizInput = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(5000).default(""),
+  promptText: z.string().trim().max(30000).default(""),
+  promptImages: z.array(z.object({ id: z.string().uuid(), alt: z.string().trim().min(1).max(200) })).max(10).default([]),
+  durationMinutes: z.number().int().min(1).max(1440),
+  linkExpiresAt: z.string().datetime().nullable().default(null),
+  questions: z.array(questionInput).min(1).max(200),
+});
+
+async function hasAssets(images: PromptImage[]): Promise<boolean> {
+  if (new Set(images.map((image) => image.id)).size !== images.length) return false;
+  if (!images.length) return true;
+  const rows = await db.select({ id: quizAssets.id }).from(quizAssets).where(inArray(quizAssets.id, images.map((image) => image.id)));
+  return rows.length === images.length;
+}
+
+export async function quizRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const parsed = z.object({ search: z.string().trim().max(100).optional(), status: z.enum(["active", "inactive"]).optional() }).safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    const filters = [];
+    if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
+    if (parsed.data.status) filters.push(eq(quizzes.status, parsed.data.status));
+    if (parsed.data.search) filters.push(or(ilike(quizzes.title, `%${parsed.data.search}%`), ilike(quizzes.description, `%${parsed.data.search}%`))!);
+    const rows = await db.select().from(quizzes).where(filters.length ? and(...filters) : undefined).orderBy(desc(quizzes.createdAt));
+    return { quizzes: rows };
+  });
+
+  app.post("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const parsed = quizInput.safeParse(request.body);
+    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
+    if (!(await hasAssets(parsed.data.promptImages))) return reply.code(400).send({ error: "invalid_assets" });
+    const linkToken = randomBytes(24).toString("base64url");
+    const [created] = await db.transaction(async (tx) => {
+      const [quiz] = await tx.insert(quizzes).values({
+        teacherId: request.authUser!.id,
+        title: parsed.data.title,
+        description: parsed.data.description,
+        promptText: parsed.data.promptText,
+        promptImages: parsed.data.promptImages,
+        durationMinutes: parsed.data.durationMinutes,
+        linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null,
+        linkToken,
+      }).returning();
+      await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));
+      return [quiz];
+    });
+    return reply.code(201).send({ quiz: created, link: `/q/${linkToken}` });
+  });
+
+  app.get("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
+    if (!quiz) return reply.code(404).send({ error: "not_found" });
+    const items = await db.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
+    return { quiz, questions: items };
+  });
+
+  app.put("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const parsed = quizInput.safeParse(request.body);
+    if (!params.success || !parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.success ? undefined : parsed.error.flatten() });
+    if (!(await hasAssets(parsed.data.promptImages))) return reply.code(400).send({ error: "invalid_assets" });
+    const filters = [eq(quizzes.id, params.data.id)];
+    if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
+    const updated = await db.transaction(async (tx) => {
+      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptText: parsed.data.promptText, promptImages: parsed.data.promptImages, durationMinutes: parsed.data.durationMinutes, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, updatedAt: new Date() }).where(and(...filters)).returning();
+      if (!quiz) return null;
+      await tx.delete(questions).where(eq(questions.quizId, quiz.id));
+      await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));
+      return quiz;
+    });
+    if (!updated) return reply.code(404).send({ error: "not_found" });
+    return { quiz: updated };
+  });
+
+  app.post("/teacher/quizzes/:id/stop", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const filters = [eq(quizzes.id, params.data.id)];
+    if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
+    const [updated] = await db.update(quizzes).set({ status: "inactive", updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id });
+    if (!updated) return reply.code(404).send({ error: "not_found" });
+    return reply.code(204).send();
+  });
+
+  app.post("/teacher/quizzes/:id/extend-link", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const body = z.object({ linkExpiresAt: z.string().datetime() }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    const filters = [eq(quizzes.id, params.data.id)];
+    if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
+    const [updated] = await db.update(quizzes).set({ linkExpiresAt: new Date(body.data.linkExpiresAt), updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id, linkExpiresAt: quizzes.linkExpiresAt });
+    if (!updated) return reply.code(404).send({ error: "not_found" });
+    return { quiz: updated };
+  });
+
+  app.post("/teacher/quizzes/:id/extend-attempts", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const body = z.object({ additionalMinutes: z.number().int().min(1).max(1440) }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    const owner = await db.select({ id: quizzes.id }).from(quizzes).where(and(eq(quizzes.id, params.data.id), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
+    if (!owner.length) return reply.code(404).send({ error: "not_found" });
+    await db.update(submissions).set({ dueAt: sql`${submissions.dueAt} + (${body.data.additionalMinutes} * interval '1 minute')` }).where(and(eq(submissions.quizId, params.data.id), isNull(submissions.submittedAt)));
+    return { updated: true };
+  });
+}

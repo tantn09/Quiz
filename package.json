@@ -1,0 +1,19 @@
+{
+  "name": "quiz-app",
+  "private": true,
+  "packageManager": "pnpm@10.30.1",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @quiz/web --filter @quiz/api dev",
+    "build": "pnpm --filter @quiz/web build && pnpm --filter @quiz/api build",
+    "typecheck": "pnpm --recursive typecheck",
+    "db:generate": "pnpm --filter @quiz/api db:generate",
+    "db:migrate": "pnpm --filter @quiz/api db:migrate",
+    "db:seed-admin": "pnpm --filter @quiz/api db:seed-admin"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.10"
+  }
+}

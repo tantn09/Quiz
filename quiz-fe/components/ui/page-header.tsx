@@ -1,0 +1,2 @@
+import * as React from "react";
+export function PageHeader({ eyebrow, title, description, action }: { eyebrow?: string; title: string; description?: string; action?: React.ReactNode }) { return <header className="flex flex-wrap items-start justify-between gap-4"><div>{eyebrow && <p className="text-xs font-bold uppercase tracking-[.16em] text-brand">{eyebrow}</p>}<h1 className="ds-page-title mt-2">{title}</h1>{description && <p className="mt-2 max-w-2xl text-content-muted">{description}</p>}</div>{action}</header>; }
