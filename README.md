@@ -35,7 +35,7 @@ Tạo `.env` từ `.env.example`, đặt `POSTGRES_PASSWORD` thành chuỗi dài
 
 ```sh
 docker compose up -d --build
-docker compose exec api pnpm --filter @quiz/api db:seed-admin
+docker compose exec api node dist/db/seed-admin.js
 ```
 
 Compose chạy PostgreSQL, API (tự áp dụng migration khi khởi động), web và Nginx reverse proxy. Proxy được bind vào `127.0.0.1:8080`; đặt reverse proxy TLS trên VPS trước địa chỉ này để cookie phiên bảo mật hoạt động. Nginx chuyển `/api/` tới Fastify cùng origin với web.
