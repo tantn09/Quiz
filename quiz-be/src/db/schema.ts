@@ -6,6 +6,9 @@ export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   username: varchar("username", { length: 80 }).notNull().unique(),
   displayName: varchar("display_name", { length: 160 }).notNull(),
+  email: varchar("email", { length: 254 }),
+  subject: varchar("subject", { length: 120 }),
+  workplace: varchar("workplace", { length: 200 }),
   passwordHash: text("password_hash").notNull(),
   role: userRole("role").notNull().default("teacher"),
   status: varchar("status", { length: 16 }).notNull().default("active"),
@@ -13,7 +16,7 @@ export const users = pgTable("users", {
   theme: varchar("theme", { length: 8 }).notNull().default("light"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [uniqueIndex("users_email_unique").on(table.email)]);
 
 export const sessions = pgTable("sessions", {
   id: uuid("id").defaultRandom().primaryKey(),

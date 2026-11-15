@@ -14,16 +14,23 @@ Yêu cầu Node.js 22 trở lên, pnpm 10 và Docker Compose.
 
 ```powershell
 Copy-Item .env.example .env
-docker compose up -d postgres
 pnpm install
-pnpm db:migrate
-pnpm db:seed-admin
 pnpm dev
 ```
 
-Web chạy tại `http://localhost:3000`; Fastify chạy tại `http://127.0.0.1:4100`; PostgreSQL được bind vào `localhost:5433` mặc định (`POSTGRES_PORT` có thể đổi nếu cổng này đang bận). Tài khoản khởi tạo là `admin` / `Admin@1234`. Hãy thay `ADMIN_INITIAL_PASSWORD` trong `.env` trước khi tạo tài khoản nếu dùng dữ liệu thật. Lệnh khởi tạo chỉ tạo tài khoản một lần và lưu mật khẩu bằng scrypt.
+`pnpm dev` tự khởi động PostgreSQL bằng Docker Compose, áp dụng migration, tạo tài khoản admin nếu chưa có, rồi chạy web và API cùng lúc. Web chạy tại `http://localhost:3000`; Fastify chạy tại `http://127.0.0.1:4100`; PostgreSQL được bind vào `localhost:5433` mặc định (`POSTGRES_PORT` có thể đổi nếu cổng này đang bận). Tài khoản khởi tạo là `admin` / `Admin@1234`. Hãy thay `ADMIN_INITIAL_PASSWORD` trong `.env` trước khi tạo tài khoản nếu dùng dữ liệu thật. Lệnh khởi tạo chỉ tạo tài khoản một lần và lưu mật khẩu bằng scrypt.
 
-Chạy riêng FE từ thư mục gốc bằng `pnpm --filter @quiz/web dev`. FE dùng API ở `127.0.0.1:4100`; để các trang đăng nhập/quản trị hoạt động, chạy thêm `pnpm --filter @quiz/api dev` trong cửa sổ terminal thứ hai. Có thể chạy cả hai cùng lúc bằng `pnpm dev`.
+API local ưu tiên `quiz-be/.env.local` cho cấu hình riêng, rồi đọc `.env` ở thư mục gốc để bổ sung biến còn thiếu. Đặt `DATABASE_URL` trong file local trỏ tới `localhost:${POSTGRES_PORT}` của PostgreSQL Docker; frontend local dùng `http://127.0.0.1:4100` qua `/api`. File `.env.local` được Git bỏ qua.
+
+Để phát triển chỉ một dịch vụ, dùng `pnpm --filter @quiz/web dev` hoặc `pnpm --filter @quiz/api dev`. Web vẫn cần API ở `127.0.0.1:4100`; nếu chỉ chạy web, hãy giữ API chạy trong terminal khác. Lệnh `pnpm dev:prepare` chạy riêng bước chuẩn bị database khi cần.
+
+## Đăng ký giáo viên
+
+Giáo viên có thể tự đăng ký tại `/register` với tên đăng nhập, email và mật khẩu. Tài khoản mới ở trạng thái chờ duyệt; admin mở trang **Giáo viên** để duyệt hoặc từ chối. Email bắt buộc và không được trùng, nhưng hiện chưa có bước xác minh email.
+
+## Quản lý quiz
+
+Giáo viên chỉ quản lý quiz do mình tạo; admin có thể quản lý tất cả. Quiz đã ngừng có thể được mở lại bằng cách đặt hạn link mới trong tương lai. Thao tác xóa ẩn quiz và chặn lượt làm mới, đồng thời giữ kết quả đã nộp.
 
 ## Nhập quiz từ Excel
 

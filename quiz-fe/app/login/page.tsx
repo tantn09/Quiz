@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { applyLanguage, useTranslation } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ export default function LoginPage() {
         credentials: "same-origin",
         body: JSON.stringify({ username: data.get("username"), password: data.get("password") }),
       });
-      if (!response.ok) throw new Error(t("Tên đăng nhập hoặc mật khẩu chưa đúng."));
+      if (!response.ok) { const body = await response.json(); throw new Error(body.error === "pending_approval" ? t("Tài khoản đang chờ admin duyệt.") : t("Tên đăng nhập hoặc mật khẩu chưa đúng.")); }
       const { user } = await response.json();
       localStorage.setItem("quiz-theme", user.theme);
       applyLanguage(user.language);
@@ -53,6 +54,7 @@ export default function LoginPage() {
         </label>
         {error && <Alert tone="error" className="mt-4">{error}</Alert>}
         <Button disabled={busy} className="mt-6 w-full">{busy ? t("Đang đăng nhập…") : t("Đăng nhập")}</Button>
+        <p className="mt-6 text-center text-sm text-content-muted">{t("Chưa có tài khoản?")} <Link href="/register" className="font-semibold text-brand underline underline-offset-4">{t("Đăng ký giáo viên")}</Link></p>
       </form>
     </main>
   );

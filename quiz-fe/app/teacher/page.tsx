@@ -10,13 +10,49 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
+import { EllipsisVertical } from "lucide-react";
 
 type QuestionDraft = { type: "choice" | "essay"; prompt: string; options: string; correctOption: string; points: number };
 type PromptImage = { id: string; alt: string };
 type ImportIssue = { sheet: string; row: number; column: string; message: string };
 type ImportDraft = { title: string; description: string; promptText: string; durationMinutes: number; linkExpiresAt: string | null; questions: { type: "choice" | "essay"; prompt: string; points: number; options: string[]; correctOption: number | null }[] };
 type QuizRow = { id: string; title: string; description: string; status: string; durationMinutes: number; linkToken: string; linkExpiresAt: string | null };
+type QuizDetail = { quiz: QuizRow & { promptText?: string; promptImages?: PromptImage[] }; questions: { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }[] };
+type QuizActionsProps = { quiz: QuizRow; t: (value: string) => string; copyLink: (quiz: QuizRow) => Promise<void>; edit: (quiz: QuizRow) => Promise<void>; openLinkExpiry: (quiz: QuizRow) => void; extendAttempts: (quiz: QuizRow) => Promise<void>; stop: (quiz: QuizRow) => Promise<void>; deleteQuiz: (quiz: QuizRow) => Promise<void> };
 const emptyQuestion = (): QuestionDraft => ({ type: "choice", prompt: "", options: "", correctOption: "0", points: 1 });
+const localDateTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+function QuizActions({ quiz, t, copyLink, edit, openLinkExpiry, extendAttempts, stop, deleteQuiz }: QuizActionsProps) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setOpen(false); };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); } };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeEscape);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeEscape); };
+  }, [open]);
+  const action = (callback: () => void) => { setOpen(false); callback(); };
+  const itemClass = "flex min-h-11 w-full items-center rounded-lg px-3 text-left text-sm hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+  return <div ref={menuRef} className="relative shrink-0 self-start">
+    <button type="button" aria-label={`${t("Tùy chọn quiz")}: ${quiz.title}`} aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((current) => !current)} className="flex h-11 w-11 items-center justify-center rounded-xl border border-line hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"><EllipsisVertical size={20} aria-hidden="true" /></button>
+    {open && <div role="menu" aria-label={`${t("Tùy chọn quiz")}: ${quiz.title}`} onKeyDown={(event) => {
+      if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : event.key === "ArrowDown" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+      items[next]?.focus();
+    }} className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-xl">
+      <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void copyLink(quiz))}>{t("Sao chép link")}</button>
+      <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void edit(quiz))}>{t("Sửa")}</button>
+      <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => openLinkExpiry(quiz))}>{quiz.status === "inactive" ? t("Mở lại và gia hạn") : t("Gia hạn link")}</button>
+      {quiz.status === "active" && <><button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void extendAttempts(quiz))}>{t("+ Thời gian làm")}</button><button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void stop(quiz))}>{t("Ngừng")}</button></>}
+      <div className="my-1 border-t border-line" /><button type="button" role="menuitem" className={`${itemClass} text-red-700`} onClick={() => action(() => void deleteQuiz(quiz))}>{t("Xóa quiz")}</button>
+    </div>}
+  </div>;
+}
 
 export default function TeacherPage() {
   const [quizzes, setQuizzes] = useState<QuizRow[]>([]);
@@ -38,6 +74,13 @@ export default function TeacherPage() {
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [linkQuiz, setLinkQuiz] = useState<QuizRow | null>(null);
+  const [newLinkExpiry, setNewLinkExpiry] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const [linkBusy, setLinkBusy] = useState(false);
+  const [detailQuiz, setDetailQuiz] = useState<QuizRow | null>(null);
+  const [detail, setDetail] = useState<QuizDetail | null>(null);
+  const [detailError, setDetailError] = useState("");
   const t = useTranslation();
 
   const load = useCallback(async () => {
@@ -132,20 +175,49 @@ export default function TeacherPage() {
     setFormError(""); setFormOpen(true);
   }
 
+  async function openDetail(quiz: QuizRow) {
+    setDetailQuiz(quiz); setDetail(null); setDetailError("");
+    try {
+      const response = await fetch(`/api/teacher/quizzes/${quiz.id}`, { cache: "no-store" });
+      if (!response.ok) throw new Error();
+      setDetail(await response.json() as QuizDetail);
+    } catch { setDetailError(t("Không tải được chi tiết quiz. Vui lòng thử lại.")); }
+  }
+
   async function stop(quiz: QuizRow) {
     const response = await fetch(`/api/teacher/quizzes/${quiz.id}/stop`, { method: "POST" });
     setNotice(response.ok ? `${t("Đã ngừng quiz:")} ${quiz.title}` : t("Không thể ngừng quiz."));
     await load();
   }
 
-  async function extendLink(quiz: QuizRow) {
-    const value = window.prompt(t("Nhập hạn link mới theo giờ địa phương (YYYY-MM-DD HH:mm):"));
-    if (!value) return;
-    const date = new Date(value.replace(" ", "T"));
-    if (Number.isNaN(date.getTime())) { setNotice(t("Định dạng ngày giờ chưa hợp lệ.")); return; }
-    const response = await fetch(`/api/teacher/quizzes/${quiz.id}/extend-link`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkExpiresAt: date.toISOString() }) });
-    setNotice(response.ok ? t("Đã gia hạn link.") : t("Không gia hạn được link."));
-    await load();
+  async function deleteQuiz(quiz: QuizRow) {
+    if (!window.confirm(`${t("Xóa quiz này khỏi danh sách?")} ${quiz.title}`)) return;
+    const response = await fetch(`/api/teacher/quizzes/${quiz.id}`, { method: "DELETE" });
+    setNotice(response.ok ? t("Đã xóa quiz khỏi danh sách. Kết quả đã nộp vẫn được giữ lại.") : t("Không xóa được quiz."));
+    if (response.ok) await load();
+  }
+
+  function openLinkExpiry(quiz: QuizRow) {
+    setLinkQuiz(quiz);
+    setNewLinkExpiry(localDateTime(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+    setLinkError("");
+  }
+
+  async function extendLink(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!linkQuiz) return;
+    const date = new Date(newLinkExpiry);
+    if (!newLinkExpiry || Number.isNaN(date.getTime()) || date <= new Date()) { setLinkError(t("Hạn link mới phải ở tương lai.")); return; }
+    setLinkBusy(true);
+    setLinkError("");
+    try {
+      const response = await fetch(`/api/teacher/quizzes/${linkQuiz.id}/${linkQuiz.status === "inactive" ? "reopen" : "extend-link"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkExpiresAt: date.toISOString() }) });
+      if (!response.ok) throw new Error();
+      setNotice(linkQuiz.status === "inactive" ? t("Đã mở lại và gia hạn quiz.") : t("Đã gia hạn link."));
+      setLinkQuiz(null);
+      await load();
+    } catch { setLinkError(t("Không gia hạn được link. Vui lòng thử lại.")); }
+    finally { setLinkBusy(false); }
   }
 
   async function extendAttempts(quiz: QuizRow) {
@@ -166,6 +238,34 @@ export default function TeacherPage() {
     <PageHeader eyebrow={t("GIÁO VIÊN")} title={t("Bài quiz của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo quiz mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{t("Nhập Excel")}</Button><Button asChild variant="outline"><Link href="/teacher/results">{t("Xem kết quả")}</Link></Button></div>} />
     <input ref={importInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importExcel(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
     {notice && <Alert className="mt-5 break-words">{notice}</Alert>}
+    {detailQuiz && <Modal title={t("Chi tiết quiz")} closeLabel={t("Đóng")} onClose={() => setDetailQuiz(null)} wide>
+      {!detail && !detailError && <p role="status" className="py-8 text-center text-content-muted">{t("Đang tải chi tiết…")}</p>}
+      {detailError && <div role="alert" className="rounded-xl ds-error p-4 text-sm">{detailError}<Button type="button" variant="outline" className="mt-3" onClick={() => void openDetail(detailQuiz)}>{t("Thử lại")}</Button></div>}
+      {detail && <div className="space-y-6">
+        <div><h3 className="text-xl font-bold">{detail.quiz.title}</h3><p className="mt-2 whitespace-pre-wrap text-sm text-content-muted">{detail.quiz.description || t("Chưa có mô tả.")}</p></div>
+        <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Trạng thái")}</p><p className="mt-1 font-semibold">{detail.quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}</p></div><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Thời lượng")}</p><p className="mt-1 font-semibold">{detail.quiz.durationMinutes} {t("phút")}</p></div><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Hạn dùng link")}</p><p className="mt-1 font-semibold">{detail.quiz.linkExpiresAt ? new Date(detail.quiz.linkExpiresAt).toLocaleString() : t("Không có hạn")}</p></div></div>
+        {(detail.quiz.promptText || detail.quiz.promptImages?.length) && <section><h4 className="font-semibold">{t("Đề bài")}</h4>{detail.quiz.promptText && <p className="mt-2 whitespace-pre-wrap text-sm">{detail.quiz.promptText}</p>}{detail.quiz.promptImages && <div className="mt-3 grid gap-3 sm:grid-cols-2">{detail.quiz.promptImages.map((image) => <img key={image.id} src={`/api/public/assets/${image.id}`} alt={image.alt} className="max-h-64 w-full rounded-xl border border-line object-contain" />)}</div>}</section>}
+        <section><h4 className="font-semibold">{t("Câu hỏi")} ({detail.questions.length})</h4><div className="mt-3 space-y-3">{detail.questions.map((question, index) => <div key={question.id} className="rounded-xl border border-line p-4"><p className="text-sm font-semibold text-content-muted">{t("Câu")} {index + 1} · {question.type === "choice" ? t("Trắc nghiệm") : t("Tự luận")} · {question.points} {t("điểm")}</p><p className="mt-2 whitespace-pre-wrap font-medium">{question.prompt}</p>{question.type === "choice" && <ol className="mt-3 space-y-1 pl-5 text-sm">{question.options.map((option, optionIndex) => <li key={optionIndex} className={`list-decimal ${optionIndex === question.correctOption ? "font-semibold text-emerald-700" : ""}`}>{option}{optionIndex === question.correctOption ? ` · ${t("Đáp án đúng")}` : ""}</li>)}</ol>}</div>)}</div></section>
+        <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" onClick={() => void copyLink(detail.quiz)}>{t("Sao chép link")}</Button><Button type="button" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>{t("Sửa quiz")}</Button></div>
+      </div>}
+    </Modal>}
+    {linkQuiz && <Modal title={linkQuiz.status === "inactive" ? t("Mở lại quiz") : t("Gia hạn link quiz")} closeLabel={t("Đóng")} onClose={() => { if (!linkBusy) setLinkQuiz(null); }}>
+      <form onSubmit={extendLink} className="space-y-5">
+        <div className="rounded-xl border border-line bg-surface-subtle p-4">
+          <p className="font-semibold">{linkQuiz.title}</p>
+          <p className="mt-1 text-sm text-content-muted">{linkQuiz.status === "inactive" ? t("Quiz sẽ mở lại để học sinh truy cập bằng link cũ.") : t("Học sinh tiếp tục dùng link hiện tại đến hạn mới.")}</p>
+          <p className="mt-2 text-sm text-content-muted">{t("Hạn hiện tại:")} {linkQuiz.linkExpiresAt ? new Date(linkQuiz.linkExpiresAt).toLocaleString() : t("Không có hạn")}</p>
+        </div>
+        <div>
+          <label htmlFor="new-link-expiry" className="block text-sm font-semibold">{t("Hạn truy cập mới")}</label>
+          <input id="new-link-expiry" type="datetime-local" required value={newLinkExpiry} min={localDateTime(new Date())} onChange={(event) => { setNewLinkExpiry(event.target.value); setLinkError(""); }} aria-describedby="new-link-expiry-help" aria-invalid={Boolean(linkError)} className="mt-2 w-full rounded-xl border border-line bg-surface px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" />
+          <p id="new-link-expiry-help" className="mt-2 text-sm text-content-muted">{t("Ngày giờ theo múi giờ trên thiết bị của bạn.")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">{[1, 7, 30].map((days) => <button key={days} type="button" onClick={() => { setNewLinkExpiry(localDateTime(new Date(Date.now() + days * 24 * 60 * 60 * 1000))); setLinkError(""); }} className="min-h-11 rounded-xl border border-line px-3 text-sm font-medium hover:bg-surface-subtle">{t("Sau")} {days} {t("ngày")}</button>)}</div>
+        </div>
+        {linkError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{linkError}</p>}
+        <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" disabled={linkBusy} onClick={() => setLinkQuiz(null)}>{t("Hủy")}</Button><Button type="submit" disabled={linkBusy}>{linkBusy ? t("Đang lưu…") : linkQuiz.status === "inactive" ? t("Mở lại quiz") : t("Lưu hạn mới")}</Button></div>
+      </form>
+    </Modal>}
     {formOpen && <Modal title={editing ? t("Sửa quiz") : t("Tạo quiz mới")} closeLabel={t("Đóng")} onClose={closeForm} wide><form onSubmit={save} className="space-y-5">
       {formError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{formError}</p>}
       {!editing && <section className="rounded-xl border border-line bg-surface-subtle p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{t("Nhập quiz từ Excel")}</h3><p className="text-sm text-content-muted">{t("Nạp dữ liệu để xem và chỉnh sửa trước khi tạo quiz.")}</p></div><a href="/api/teacher/quizzes/import-template.xlsx" download className="rounded-lg border border-line bg-surface px-3 py-2 text-sm font-semibold">{t("Tải file mẫu")}</a></div><label className="mt-4 block text-sm font-medium">{t("Chọn file .xlsx")}<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" disabled={importBusy} onChange={(event) => { void importExcel(event.target.files?.[0]); event.target.value = ""; }} className="mt-2 block w-full text-sm" /></label>{importBusy && <p role="status" className="mt-2 text-sm">{t("Đang đọc file…")}</p>}{importErrors.length > 0 && <div role="alert" className="mt-3 rounded-lg ds-error p-3 text-sm"><p className="font-semibold">{t("File Excel có lỗi:")}</p><ul className="mt-2 list-disc space-y-1 pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t("dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}</section>}
@@ -175,7 +275,7 @@ export default function TeacherPage() {
       <div className="mt-5 flex flex-wrap gap-3"><button type="button" onClick={addQuestion} className="rounded-xl border border-line px-4 py-3 font-semibold">{t("+ Thêm câu hỏi")}</button><button disabled={busy || uploading || importBusy} className="rounded-xl ds-gradient px-5 py-3 font-semibold text-white disabled:opacity-60">{busy ? t("Đang lưu…") : editing ? t("Lưu thay đổi") : t("Tạo quiz")}</button></div>
     </form></Modal>}
     <section className="mt-8 rounded-2xl border border-line bg-surface p-5 sm:p-7"><div className="flex flex-col gap-3 sm:flex-row"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Tìm quiz")} className="min-w-0 flex-1 rounded-xl border border-line px-4 py-3" /><Select value={status} onValueChange={setStatus} ariaLabel={t("Tất cả trạng thái")} options={[{ value: "", label: t("Tất cả trạng thái") }, { value: "active", label: t("Đang mở") }, { value: "inactive", label: t("Đã ngừng") }]} className="sm:w-56" /></div>
-      <div className="mt-5 grid gap-3">{quizzes.map((quiz) => <article key={quiz.id} className="flex flex-col justify-between gap-4 rounded-xl border border-line p-4 sm:flex-row sm:items-center"><div><h3 className="font-bold">{quiz.title}</h3><p className="mt-1 text-sm text-content-muted">{quiz.durationMinutes} {t("phút")} · {quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}{quiz.linkExpiresAt ? ` · ${t("Hết link")} ${new Date(quiz.linkExpiresAt).toLocaleString()}` : ""}</p></div><div className="flex flex-wrap gap-2"><button onClick={() => void copyLink(quiz)} className="rounded-lg border border-line px-3 py-2 text-sm">{t("Sao chép link")}</button><button onClick={() => void edit(quiz)} className="rounded-lg border border-line px-3 py-2 text-sm">{t("Sửa")}</button>{quiz.status === "active" && <><button onClick={() => void extendLink(quiz)} className="rounded-lg border border-line px-3 py-2 text-sm">{t("Gia hạn link")}</button><button onClick={() => void extendAttempts(quiz)} className="rounded-lg border border-line px-3 py-2 text-sm">{t("+ Thời gian làm")}</button><button onClick={() => void stop(quiz)} className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700">{t("Ngừng")}</button></>}</div></article>)}{quizzes.length === 0 && <EmptyState title={t("Chưa có quiz.")} />}</div>
+      <div className="mt-5 grid gap-3">{quizzes.map((quiz) => <article key={quiz.id} className="flex flex-col justify-between gap-4 rounded-xl border border-line p-4 sm:flex-row sm:items-center"><button type="button" onClick={() => void openDetail(quiz)} className="min-w-0 flex-1 rounded-lg text-left hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" aria-label={`${t("Xem chi tiết quiz")}: ${quiz.title}`}><h3 className="font-bold">{quiz.title}</h3><p className="mt-1 text-sm text-content-muted">{quiz.durationMinutes} {t("phút")} · {quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}{quiz.linkExpiresAt ? ` · ${t("Hết link")} ${new Date(quiz.linkExpiresAt).toLocaleString()}` : ""}</p><span className="mt-2 block text-xs font-medium text-brand">{t("Xem chi tiết")}</span></button><QuizActions quiz={quiz} t={t} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts} stop={stop} deleteQuiz={deleteQuiz} /></article>)}{quizzes.length === 0 && <EmptyState title={t("Chưa có quiz.")} />}</div>
     </section>
   </div></main></>;
 }
