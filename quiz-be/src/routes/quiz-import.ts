@@ -26,15 +26,34 @@ export async function quizImportRoutes(app: FastifyInstance): Promise<void> {
     const workbook = new ExcelJS.Workbook();
     const info = workbook.addWorksheet("Quiz");
     info.addRow(["field", "value"]);
-    info.addRows([["title", "Ví dụ: Kiểm tra chương 1"], ["description", "Mô tả ngắn"], ["durationMinutes", 30], ["linkExpiresAt", ""], ["promptText", "Đọc đề bài trước khi trả lời."]]);
+    info.addRows([["title", ""], ["description", ""], ["durationMinutes", 30], ["linkExpiresAt", ""], ["promptText", ""]]);
     info.getColumn(1).width = 24; info.getColumn(2).width = 46;
     const questions = workbook.addWorksheet("Questions");
     questions.addRow(questionColumns);
-    questions.addRow(["choice", "2 + 2 bằng bao nhiêu?", 1, "3", "4", "5", "", "", "", "", "", 2]);
-    questions.addRow(["essay", "Giải thích cách em tìm đáp án.", 2]);
     questions.getColumn(1).width = 14; questions.getColumn(2).width = 48;
     for (let i = 3; i <= 12; i++) questions.getColumn(i).width = 16;
-    for (const sheet of [info, questions]) { sheet.getRow(1).font = { bold: true }; sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEAF0FF" } }; }
+    for (let row = 2; row <= 201; row++) {
+      questions.getCell(`A${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"choice,essay"'] };
+      questions.getCell(`C${row}`).dataValidation = { type: "whole", operator: "between", allowBlank: true, formulae: [0, 1000] };
+      questions.getCell(`L${row}`).dataValidation = { type: "whole", operator: "between", allowBlank: true, formulae: [1, 8] };
+    }
+    const guide = workbook.addWorksheet("Hướng dẫn");
+    guide.addRows([
+      ["HƯỚNG DẪN NHẬP QUIZ", "Điền sheet Quiz và Questions, sau đó tải file này lên ở mục Nhập Excel."],
+      ["Quiz", "title: tên quiz (bắt buộc); description: mô tả; durationMinutes: số phút từ 1 đến 1440."],
+      ["Quiz", "linkExpiresAt: để trống nếu không hết hạn; nếu điền, dùng ISO 8601 có múi giờ, ví dụ 2026-12-31T23:59:00+07:00."],
+      ["Quiz", "promptText: nội dung đề bài chung, có thể để trống."],
+      ["Questions", "Mỗi dòng là một câu hỏi. type chọn choice (trắc nghiệm) hoặc essay (tự luận); prompt là nội dung câu hỏi; points là điểm số."],
+      ["Trắc nghiệm", "Điền liên tiếp option1, option2... (2 đến 8 đáp án). correctOption là SỐ THỨ TỰ đáp án đúng, bắt đầu từ 1."],
+      ["Tự luận", "Để trống option1–option8 và correctOption."],
+      ["Ví dụ trắc nghiệm", "type=choice | prompt=2 + 2 bằng bao nhiêu? | points=1 | option1=3 | option2=4 | option3=5 | correctOption=2"],
+      ["Ví dụ tự luận", "type=essay | prompt=Giải thích cách em tìm đáp án. | points=2"],
+      ["Lưu ý", "Không dùng công thức. Tối đa 200 câu hỏi và file 2 MB. Ảnh đề bài được thêm trong modal sau khi import."],
+      ["Môn học và lớp", "Sau khi import, chọn môn học và thêm lớp cùng hạn truy cập trong modal tạo quiz."],
+    ]);
+    guide.getColumn(1).width = 23; guide.getColumn(2).width = 110;
+    for (const sheet of [info, questions, guide]) { sheet.views = [{ state: "frozen", ySplit: 1 }]; sheet.getRow(1).font = { bold: true }; sheet.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEAF0FF" } }; }
+    questions.autoFilter = { from: "A1", to: "L1" };
     return reply.type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").header("Content-Disposition", 'attachment; filename="quiz-import-template.xlsx"').send(Buffer.from(await workbook.xlsx.writeBuffer()));
   });
 

@@ -34,7 +34,10 @@ Giáo viên chỉ quản lý quiz do mình tạo; admin có thể quản lý t�
 
 ## Nhập quiz từ Excel
 
-Trong trang **Bài quiz của tôi**, chọn **Nhập Excel**, tải file mẫu và chọn file `.xlsx` đã điền. Hệ thống kiểm tra file rồi nạp dữ liệu vào modal tạo quiz để giáo viên xem, sửa và bấm **Tạo quiz**. File có hai sheet `Quiz` (`field`, `value`) và `Questions` (`type`, `prompt`, `points`, `option1`–`option8`, `correctOption`). `correctOption` trong Excel đánh số từ 1; câu tự luận để trống các cột đáp án. Hạn link, nếu có, dùng ISO 8601 kèm múi giờ. Giới hạn file là 2 MB và 200 câu hỏi. Ảnh đề bài được thêm riêng trong modal sau khi nhập file.
+Trong trang **Bài quiz của tôi**, chọn **Tải file mẫu** cạnh nút **Nhập Excel**, đọc sheet `Hướng dẫn`, điền hai sheet `Quiz` và `Questions`, rồi chọn **Nhập Excel** để tải file `.xlsx` lên. Ví dụ chỉ nằm trong sheet hướng dẫn, không được import. Hệ thống kiểm tra file rồi nạp dữ liệu vào trang tạo quiz để giáo viên xem, sửa và bấm **Tạo quiz**. Giữ nguyên tên sheet và tiêu đề cột; `correctOption` đánh số từ 1, câu tự luận để trống các cột đáp án. Hạn link, nếu có, dùng ISO 8601 kèm múi giờ. Giới hạn file là 2 MB và 200 câu hỏi. Ảnh đề bài được thêm riêng trong modal sau khi nhập file.
+
+Quiz mới cần một môn học và ít nhất một lớp. Mỗi lớp có hạn truy cập riêng; giáo viên có thể thêm lớp hoặc đổi hạn khi sửa quiz. Học sinh dùng một link chung, nhập họ tên và chọn lớp trước khi làm. File Excel chỉ chứa nội dung câu hỏi; môn học và lớp được gán trên trang tạo quiz sau khi nhập.
+Trang giáo viên mở tạo quiz, xem chi tiết và sửa quiz trên các trang riêng. Nút **Nhập Excel** dẫn tới trang tạo quiz; chọn file trong phần nhập Excel trên trang đó.
 
 ## Triển khai bằng Docker Compose
 

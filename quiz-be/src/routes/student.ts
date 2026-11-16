@@ -31,9 +31,9 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const params = z.object({ token: z.string().min(20).max(80) }).safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: "not_found" });
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).limit(1);
-    if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return reply.code(410).send({ error: "link_expired" });
+    if (!quiz || quiz.status !== "active" || (!quiz.classConfigs.length && quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return reply.code(410).send({ error: "link_expired" });
     const items = await db.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
-    return { quiz: { title: quiz.title, description: quiz.description, promptText: quiz.promptText, promptImages: quiz.promptImages }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
+    return { quiz: { title: quiz.title, description: quiz.description, promptText: quiz.promptText, promptImages: quiz.promptImages, subject: quiz.subject, classConfigs: quiz.classConfigs }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
   });
 
   app.post("/public/quizzes/:token/start", async (request, reply) => {
@@ -43,7 +43,12 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const resumeToken = randomBytes(32).toString("base64url");
     const result = await db.transaction(async (tx) => {
       const [quiz] = await tx.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).for("update").limit(1);
-      if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return { kind: "expired" as const };
+      if (!quiz || quiz.status !== "active" || (!quiz.classConfigs.length && quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return { kind: "expired" as const };
+      if (quiz.classConfigs.length) {
+        const selected = quiz.classConfigs.find((item) => identityKey(item.name) === identityKey(body.data.className));
+        if (!selected) return { kind: "invalid_class" as const };
+        if (new Date(selected.expiresAt) <= new Date()) return { kind: "expired" as const };
+      }
       const nameKey = identityKey(body.data.name);
       const classKey = identityKey(body.data.className);
       const [existing] = await tx.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))).limit(1);
@@ -64,6 +69,7 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       return { kind: "created" as const, quiz, attempt, snapshot };
     });
     if (result.kind === "expired") return reply.code(410).send({ error: "link_expired" });
+    if (result.kind === "invalid_class") return reply.code(400).send({ error: "invalid_class" });
     if (result.kind === "duplicate") return reply.code(409).send({ error: "attempt_exists" });
     return reply.code(201).send({ attempt: { id: result.attempt.id, startedAt: result.attempt.startedAt, dueAt: result.attempt.dueAt }, resumeToken, quiz: { title: result.quiz.title, prompt: result.attempt.promptSnapshot }, questions: publicQuestions(result.snapshot) });
   });

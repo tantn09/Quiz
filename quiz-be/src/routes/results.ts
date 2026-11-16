@@ -12,17 +12,18 @@ function ownerFilter(user: { id: string; role: string }) {
 
 export async function resultRoutes(app: FastifyInstance): Promise<void> {
   app.get("/teacher/results", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
-    const query = z.object({ quizId: z.string().uuid().optional(), search: z.string().trim().max(100).optional(), gradingStatus: z.enum(["pending", "needs_review", "graded"]).optional() }).safeParse(request.query);
+    const query = z.object({ quizId: z.string().uuid().optional(), className: z.string().trim().max(80).optional(), search: z.string().trim().max(100).optional(), gradingStatus: z.enum(["pending", "needs_review", "graded"]).optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "invalid_request" });
     const filters = [];
     const owner = ownerFilter(request.authUser!);
     if (owner) filters.push(owner);
     if (query.data.quizId) filters.push(eq(quizzes.id, query.data.quizId));
+    if (query.data.className) filters.push(eq(submissions.studentClass, query.data.className));
     if (query.data.gradingStatus) filters.push(eq(submissions.gradingStatus, query.data.gradingStatus));
     if (query.data.search) filters.push(or(ilike(submissions.studentName, `%${query.data.search}%`), ilike(submissions.studentClass, `%${query.data.search}%`), ilike(quizzes.title, `%${query.data.search}%`))!);
     const rows = await db.select({ id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title })
       .from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(filters.length ? and(...filters) : undefined).orderBy(desc(submissions.submittedAt));
-    const quizList = await db.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(owner);
+    const quizList = await db.select({ id: quizzes.id, title: quizzes.title, classConfigs: quizzes.classConfigs }).from(quizzes).where(owner);
     return { results: rows, quizzes: quizList };
   });
 
@@ -71,10 +72,11 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/teacher/quizzes/:id/results.xlsx", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const query = z.object({ className: z.string().trim().max(80).optional() }).safeParse(request.query);
+    if (!params.success || !query.success) return reply.code(400).send({ error: "invalid_request" });
     const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ownerFilter(request.authUser!))).limit(1);
     if (!quiz) return reply.code(404).send({ error: "not_found" });
-    const rows = await db.select().from(submissions).where(eq(submissions.quizId, quiz.id)).orderBy(desc(submissions.submittedAt));
+    const rows = await db.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), query.data.className ? eq(submissions.studentClass, query.data.className) : undefined)).orderBy(desc(submissions.submittedAt));
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("Kết quả");
     const english = request.authUser!.language === "en";

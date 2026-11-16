@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/field";
 
 type QuizQuestion = { id: string; position: number; type: "choice" | "essay"; prompt: string; options: string[]; points: number };
-type QuizInfo = { title: string; description: string; promptText: string; promptImages: { id: string; alt: string }[] };
+type QuizInfo = { title: string; description: string; promptText: string; promptImages: { id: string; alt: string }[]; subject?: string | null; classConfigs?: { name: string; expiresAt: string }[] };
 type Attempt = { id: string; dueAt: string; submitted: boolean };
 type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean };
 
@@ -178,11 +178,12 @@ export default function StudentQuizPage() {
       <Card className={`rounded-3xl p-6 sm:p-9 ${hasPrompt ? "lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto" : ""} ${hasPrompt && mobileTab === "prompt" ? "hidden lg:block" : ""}`}>
         <p className="text-sm font-semibold text-brand">{t("BÀI QUIZ")}</p>
         <h1 className="mt-2 text-3xl font-bold">{quiz?.title ?? t("Không mở được quiz")}</h1>
+        {quiz?.subject && <p className="mt-2 text-sm font-semibold text-brand">{t("Môn học")}: {quiz.subject}</p>}
         {quiz?.description && <p className="mt-3 whitespace-pre-wrap text-content-muted">{quiz.description}</p>}
         {error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
         {!attempt && !error && <form onSubmit={start} className="mt-7 grid gap-4 sm:grid-cols-2">
           <label className="text-sm font-medium">{t("Họ và tên")}<Input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2" /></label>
-          <label className="text-sm font-medium">{t("Lớp")}<Input required value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2" /></label>
+          <label className="text-sm font-medium">{t("Lớp")}{quiz?.classConfigs?.length ? <select required value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-line bg-surface px-3"><option value="">{t("Chọn lớp")}</option>{quiz.classConfigs.map((item) => <option key={item.name} value={item.name} disabled={new Date(item.expiresAt) <= new Date()}>{item.name}{new Date(item.expiresAt) <= new Date() ? ` (${t("Đã hết hạn")})` : ""}</option>)}</select> : <Input required value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2" />}</label>
           <Button disabled={busy} className="sm:col-span-2">{busy ? t("Đang bắt đầu…") : t("Bắt đầu làm bài")}</Button>
         </form>}
         {attempt && done && <p className={`mt-7 rounded-2xl p-5 font-semibold ${pending ? "ds-warning" : "ds-success"}`}>{pending ? t("Bài làm đã được chốt trên thiết bị và sẽ gửi khi có kết nối mạng.") : t("Bài làm đã được chốt. Cảm ơn bạn!")}</p>}

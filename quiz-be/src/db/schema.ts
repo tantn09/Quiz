@@ -35,6 +35,8 @@ export const quizzes = pgTable("quizzes", {
   promptImages: jsonb("prompt_images").$type<PromptImage[]>().notNull().default([]),
   status: varchar("status", { length: 16 }).notNull().default("active"),
   durationMinutes: integer("duration_minutes").notNull(),
+  subject: varchar("subject", { length: 120 }),
+  classConfigs: jsonb("class_configs").$type<{ name: string; expiresAt: string }[]>().notNull().default([]),
   linkExpiresAt: timestamp("link_expires_at", { withTimezone: true }),
   linkToken: varchar("link_token", { length: 64 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
