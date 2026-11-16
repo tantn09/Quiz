@@ -3,6 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 
 const english: Record<string, string> = {
+  "Mục lục tạo quiz": "Quiz editor sections",
+  "Chọn mục": "Jump to section",
+  "Nhân bản": "Duplicate",
+  "Đưa câu lên": "Move question up",
+  "Đưa câu xuống": "Move question down",
+  "Đến phần cần sửa": "Go to the section to fix",
+  "Giờ": "Time",
+  "Ngày": "Date",
   "Về danh sách quiz": "Back to quizzes",
   "Môn học và lớp": "Subject and classes",
   "Đã mở lại quiz.": "Quiz reopened.",
