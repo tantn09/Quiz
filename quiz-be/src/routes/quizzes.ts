@@ -4,7 +4,7 @@ import { and, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
-import { questions, quizzes, submissions, quizAssets, type PromptImage } from "../db/schema.js";
+import { questions, quizzes, submissions, quizAssets, subjects, gradeLevels, type PromptImage } from "../db/schema.js";
 
 const questionInput = z.object({
   type: z.enum(["choice", "essay"]),
@@ -28,14 +28,20 @@ export const quizInput = z.object({
   promptImages: z.array(z.object({ id: z.string().uuid(), alt: z.string().trim().min(1).max(200) })).max(10).default([]),
   durationMinutes: z.number().int().min(1).max(1440),
   linkExpiresAt: z.string().datetime().nullable().default(null),
+  subjectId: z.string().uuid().nullable().default(null),
+  gradeLevelId: z.string().uuid().nullable().default(null),
   subject: z.string().trim().max(120).optional(),
-  classConfigs: z.array(z.object({ name: z.string().trim().min(1).max(80), expiresAt: z.string().datetime() })).max(100).optional(),
+  gradeLevel: z.string().trim().max(120).optional(),
   questions: z.array(questionInput).min(1).max(200),
-}).superRefine((quiz, context) => {
-  if (quiz.classConfigs?.length && !quiz.subject) context.addIssue({ code: "custom", path: ["subject"], message: "Cần chọn môn học." });
-  const names = quiz.classConfigs?.map((item) => item.name.normalize("NFKC").toLocaleLowerCase("vi")) ?? [];
-  if (new Set(names).size !== names.length) context.addIssue({ code: "custom", path: ["classConfigs"], message: "Tên lớp bị trùng." });
 });
+
+async function resolveLabels(data: z.infer<typeof quizInput>, existing?: typeof quizzes.$inferSelect) {
+  const [subject] = data.subjectId ? await db.select({ name: subjects.name }).from(subjects).where(eq(subjects.id, data.subjectId)).limit(1) : [];
+  const [grade] = data.gradeLevelId ? await db.select({ name: gradeLevels.name }).from(gradeLevels).where(eq(gradeLevels.id, data.gradeLevelId)).limit(1) : [];
+  const subjectName = subject?.name ?? (!data.subjectId && existing?.subject === data.subject ? existing?.subject : null);
+  const gradeName = grade?.name ?? (!data.gradeLevelId && existing?.gradeLevel === data.gradeLevel ? existing?.gradeLevel : null);
+  return subjectName && gradeName ? { subject: subjectName, gradeLevel: gradeName } : null;
+}
 
 async function hasAssets(images: PromptImage[]): Promise<boolean> {
   if (new Set(images.map((image) => image.id)).size !== images.length) return false;
@@ -59,7 +65,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.post("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const parsed = quizInput.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
-    if (!parsed.data.classConfigs?.length || parsed.data.classConfigs.some((item) => new Date(item.expiresAt) <= new Date())) return reply.code(400).send({ error: "classes_required_or_expired" });
+    const labels = await resolveLabels(parsed.data);
+    if (!labels) return reply.code(400).send({ error: "invalid_catalog_selection" });
     if (!(await hasAssets(parsed.data.promptImages))) return reply.code(400).send({ error: "invalid_assets" });
     const linkToken = randomBytes(24).toString("base64url");
     const [created] = await db.transaction(async (tx) => {
@@ -70,8 +77,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
         promptText: parsed.data.promptText,
         promptImages: parsed.data.promptImages,
         durationMinutes: parsed.data.durationMinutes,
-        subject: parsed.data.subject,
-        classConfigs: parsed.data.classConfigs,
+        ...labels,
         linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null,
         linkToken,
       }).returning();
@@ -100,10 +106,9 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     const updated = await db.transaction(async (tx) => {
       const [existing] = await tx.select().from(quizzes).where(and(...filters)).for("update").limit(1);
       if (!existing) return null;
-      const oldNames = existing.classConfigs.map((item) => item.name);
-      if (oldNames.some((name) => !parsed.data.classConfigs?.some((item) => item.name === name))) return null;
-      if (parsed.data.classConfigs?.some((item) => !oldNames.includes(item.name) && new Date(item.expiresAt) <= new Date())) return null;
-      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptText: parsed.data.promptText, promptImages: parsed.data.promptImages, durationMinutes: parsed.data.durationMinutes, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, subject: parsed.data.subject ?? existing.subject, classConfigs: parsed.data.classConfigs ?? existing.classConfigs, updatedAt: new Date() }).where(and(...filters)).returning();
+      const labels = await resolveLabels(parsed.data, existing);
+      if (!labels) return null;
+      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptText: parsed.data.promptText, promptImages: parsed.data.promptImages, durationMinutes: parsed.data.durationMinutes, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
       if (!quiz) return null;
       await tx.delete(questions).where(eq(questions.quizId, quiz.id));
       await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));
@@ -141,7 +146,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     const filters = [eq(quizzes.id, params.data.id), eq(quizzes.status, "inactive")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const [existing] = await db.select().from(quizzes).where(and(...filters)).limit(1);
-    if (!existing || (!existing.classConfigs.length && !body.data.linkExpiresAt)) return reply.code(400).send({ error: "invalid_request" });
+    if (!existing || (!body.data.linkExpiresAt && (!existing.linkExpiresAt || existing.linkExpiresAt <= new Date()))) return reply.code(400).send({ error: "invalid_request" });
     const [updated] = await db.update(quizzes).set({ status: "active", ...(body.data.linkExpiresAt ? { linkExpiresAt: new Date(body.data.linkExpiresAt) } : {}), updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id, status: quizzes.status, linkExpiresAt: quizzes.linkExpiresAt });
     if (!updated) return reply.code(404).send({ error: "not_found" });
     return { quiz: updated };

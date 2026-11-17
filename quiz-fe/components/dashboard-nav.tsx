@@ -42,6 +42,7 @@ export function DashboardNav({ admin = false }: DashboardNavProps) {
   const links = [
     ...(admin ? [{ href: "/admin", label: t("Tổng quan"), icon: LayoutDashboard }] : []),
     ...(admin ? [{ href: "/admin/teachers", label: t("Giáo viên"), icon: Users }] : []),
+    ...(admin ? [{ href: "/admin/catalogs", label: t("Danh mục"), icon: GraduationCap }] : []),
     { href: "/teacher", label: t("Quiz"), icon: BookOpenCheck },
     { href: "/teacher/results", label: t("Kết quả"), icon: BarChart3 },
     { href: "/settings", label: t("Cài đặt"), icon: Settings },

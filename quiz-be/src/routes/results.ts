@@ -23,8 +23,9 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
     if (query.data.search) filters.push(or(ilike(submissions.studentName, `%${query.data.search}%`), ilike(submissions.studentClass, `%${query.data.search}%`), ilike(quizzes.title, `%${query.data.search}%`))!);
     const rows = await db.select({ id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title })
       .from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(filters.length ? and(...filters) : undefined).orderBy(desc(submissions.submittedAt));
-    const quizList = await db.select({ id: quizzes.id, title: quizzes.title, classConfigs: quizzes.classConfigs }).from(quizzes).where(owner);
-    return { results: rows, quizzes: quizList };
+    const quizList = await db.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(owner);
+    const classes = await db.selectDistinct({ quizId: quizzes.id, name: submissions.studentClass }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(owner);
+    return { results: rows, quizzes: quizList.map((quiz) => ({ ...quiz, classes: classes.filter((item) => item.quizId === quiz.id).map((item) => item.name) })) };
   });
 
   app.get("/teacher/results/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {

@@ -26,6 +26,18 @@ export const sessions = pgTable("sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const subjects = pgTable("subjects", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  nameKey: varchar("name_key", { length: 120 }).notNull().unique(),
+});
+
+export const gradeLevels = pgTable("grade_levels", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  nameKey: varchar("name_key", { length: 120 }).notNull().unique(),
+});
+
 export const quizzes = pgTable("quizzes", {
   id: uuid("id").defaultRandom().primaryKey(),
   teacherId: uuid("teacher_id").notNull().references(() => users.id),
@@ -36,7 +48,7 @@ export const quizzes = pgTable("quizzes", {
   status: varchar("status", { length: 16 }).notNull().default("active"),
   durationMinutes: integer("duration_minutes").notNull(),
   subject: varchar("subject", { length: 120 }),
-  classConfigs: jsonb("class_configs").$type<{ name: string; expiresAt: string }[]>().notNull().default([]),
+  gradeLevel: varchar("grade_level", { length: 120 }),
   linkExpiresAt: timestamp("link_expires_at", { withTimezone: true }),
   linkToken: varchar("link_token", { length: 64 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
