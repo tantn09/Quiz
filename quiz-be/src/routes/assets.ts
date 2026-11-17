@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { eq, lt } from "drizzle-orm";
+import { and, eq, inArray, lt, or, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
 import { quizAssets, quizzes, submissions } from "../db/schema.js";
+import { promptImageIds } from "../prompt-document.js";
 
 const assetDir = process.env.ASSET_DIR ?? "./uploads";
 const uploadBody = z.object({ data: z.string().max(7_000_000) });
@@ -17,6 +18,17 @@ const formats = [
 ];
 
 export async function assetRoutes(app: FastifyInstance): Promise<void> {
+  app.post("/teacher/assets/reserve", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const body = z.object({ ids: z.array(z.string().uuid()).max(10) }).safeParse(request.body);
+    if (!body.success) return reply.code(400).send({ error: "invalid_request" });
+    const ids = [...new Set(body.data.ids)];
+    if (!ids.length) return { reservedUntil: null };
+    const owned = await db.select({ id: quizAssets.id }).from(quizAssets).where(and(inArray(quizAssets.id, ids), eq(quizAssets.uploadedBy, request.authUser!.id)));
+    if (owned.length !== ids.length) return reply.code(404).send({ error: "invalid_assets" });
+    const reservedUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.update(quizAssets).set({ draftReservedUntil: reservedUntil }).where(and(inArray(quizAssets.id, ids), eq(quizAssets.uploadedBy, request.authUser!.id)));
+    return { reservedUntil };
+  });
   app.post("/teacher/assets", { preHandler: [requireTeacherAccess], bodyLimit: 7_000_000 }, async (request, reply) => {
     const parsed = uploadBody.safeParse(request.body);
     if (!parsed.success || !/^[A-Za-z0-9+/]+={0,2}$/.test(parsed.data.data)) return reply.code(400).send({ error: "invalid_image" });
@@ -45,11 +57,11 @@ export async function assetRoutes(app: FastifyInstance): Promise<void> {
 }
 
 export async function cleanupUnusedAssets(): Promise<void> {
-  const old = await db.select().from(quizAssets).where(lt(quizAssets.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)));
+  const old = await db.select().from(quizAssets).where(and(lt(quizAssets.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)), or(isNull(quizAssets.draftReservedUntil), lt(quizAssets.draftReservedUntil, new Date()))));
   if (!old.length) return;
-  const quizImages = await db.select({ images: quizzes.promptImages }).from(quizzes);
+  const quizImages = await db.select({ images: quizzes.promptDocument }).from(quizzes);
   const attemptImages = await db.select({ prompt: submissions.promptSnapshot }).from(submissions);
-  const used = new Set([...quizImages.flatMap((row) => row.images.map((image) => image.id)), ...attemptImages.flatMap((row) => row.prompt?.images.map((image) => image.id) ?? [])]);
+  const used = new Set([...quizImages.flatMap((row) => promptImageIds(row.images)), ...attemptImages.flatMap((row) => row.prompt ? promptImageIds(row.prompt) : [])]);
   for (const asset of old) {
     if (used.has(asset.id)) continue;
     const ext = formats.find((item) => item.mime === asset.mimeType)?.ext;

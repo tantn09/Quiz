@@ -33,7 +33,7 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).limit(1);
     if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return reply.code(410).send({ error: "link_expired" });
     const items = await db.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
-    return { quiz: { title: quiz.title, description: quiz.description, promptText: quiz.promptText, promptImages: quiz.promptImages, subject: quiz.subject, gradeLevel: quiz.gradeLevel }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
+    return { quiz: { title: quiz.title, description: quiz.description, promptDocument: quiz.promptDocument, subject: quiz.subject, gradeLevel: quiz.gradeLevel }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
   });
 
   app.post("/public/quizzes/:token/start", async (request, reply) => {
@@ -60,7 +60,7 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       }));
       const startedAt = new Date();
       const dueAt = new Date(startedAt.getTime() + quiz.durationMinutes * 60_000);
-      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, studentName: body.data.name, studentClass: body.data.className, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: { text: quiz.promptText, images: quiz.promptImages } }).returning();
+      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, studentName: body.data.name, studentClass: body.data.className, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
       return { kind: "created" as const, quiz, attempt, snapshot };
     });
     if (result.kind === "expired") return reply.code(410).send({ error: "link_expired" });

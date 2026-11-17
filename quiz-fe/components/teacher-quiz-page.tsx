@@ -11,25 +11,40 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
+import { PromptEditor, emptyPrompt, promptImages, type PromptDocument } from "@/components/prompt-editor";
+import { PromptView } from "@/components/prompt-view";
 import { DragDropProvider } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
-import { ArrowDown, ArrowUp, ChevronDown, ChevronUp, Copy, EllipsisVertical, GripVertical, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Clock3, Copy, EllipsisVertical, GripVertical, Trash2 } from "lucide-react";
 
 type QuestionDraft = { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number; points: number };
-type PromptImage = { id: string; alt: string };
+
 type ImportIssue = { sheet: string; row: number; column: string; message: string };
-type ImportDraft = { title: string; description: string; promptText: string; durationMinutes: number; linkExpiresAt: string | null; questions: { type: "choice" | "essay"; prompt: string; points: number; options: string[]; correctOption: number | null }[] };
+type ImportDraft = { title: string; description: string; promptDocument: PromptDocument; durationMinutes: number; linkExpiresAt: string | null; questions: { type: "choice" | "essay"; prompt: string; points: number; options: string[]; correctOption: number | null }[] };
 type QuizRow = { id: string; title: string; description: string; status: string; durationMinutes: number; linkToken: string; linkExpiresAt: string | null; subject: string | null; gradeLevel: string | null };
 type CatalogItem = { id: string; name: string };
-type QuizDetail = { quiz: QuizRow & { promptText?: string; promptImages?: PromptImage[] }; questions: { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }[] };
+type SavedDraft = { savedAt: number; title: string; description: string; promptDocument: PromptDocument; duration: number; expiresAt: string; subject: string; gradeLevel: string; questions: QuestionDraft[] };
+const DRAFT_TTL = 30 * 24 * 60 * 60 * 1000;
+type QuizDetail = { quiz: QuizRow & { promptDocument?: PromptDocument }; questions: { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }[] };
 type QuizActionsProps = { quiz: QuizRow; t: (value: string) => string; copyLink: (quiz: QuizRow) => Promise<void>; edit: (quiz: QuizRow) => Promise<void>; openLinkExpiry: (quiz: QuizRow) => void; extendAttempts: (quiz: QuizRow) => Promise<void>; stop: (quiz: QuizRow) => Promise<void>; deleteQuiz: (quiz: QuizRow) => Promise<void> };
 const emptyQuestion = (): QuestionDraft => ({ id: crypto.randomUUID(), type: "choice", prompt: "", options: ["", ""], correctOption: -1, points: 1 });
 const localDateTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const formatTimeFirst = (value: string) => { const date = new Date(value); return `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} · ${date.toLocaleDateString("vi-VN")}`; };
 function TimeFirstDateTime({ label, value, onChange, required = false, t }: { label: string; value: string; onChange: (value: string) => void; required?: boolean; t: (value: string) => string }) {
   const [date = "", time = ""] = value.split("T");
-  const combine = (nextDate: string, nextTime: string) => onChange(nextDate || nextTime ? `${nextDate}T${nextTime}` : "");
-  return <fieldset className="min-w-0"><legend className="text-sm font-medium">{label}</legend><div className="mt-2 grid gap-2 sm:grid-cols-2"><label className="text-sm">{t("Giờ")}<input type="time" required={required || Boolean(date)} value={time} onChange={(event) => combine(date, event.target.value)} className="mt-1 w-full rounded-xl border border-line px-3 py-2" /></label><label className="text-sm">{t("Ngày")}<input type="date" required={required || Boolean(time)} value={date} onChange={(event) => combine(event.target.value, time)} className="mt-1 w-full rounded-xl border border-line px-3 py-2" /></label></div></fieldset>;
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [timeOpen, setTimeOpen] = useState(false);
+  const timeRef = useRef<HTMLDivElement>(null);
+  const [month, setMonth] = useState(() => new Date());
+  const calendarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (!calendarOpen) return; const close = (event: PointerEvent) => { if (!calendarRef.current?.contains(event.target as Node)) setCalendarOpen(false); }; document.addEventListener("pointerdown", close); return () => document.removeEventListener("pointerdown", close); }, [calendarOpen]);
+  useEffect(() => { if (!timeOpen) return; const close = (event: PointerEvent) => { if (!timeRef.current?.contains(event.target as Node)) setTimeOpen(false); }; document.addEventListener("pointerdown", close); return () => document.removeEventListener("pointerdown", close); }, [timeOpen]);
+  const selected = date ? new Date(`${date}T12:00:00`) : null;
+  const view = month;
+  const firstDay = new Date(view.getFullYear(), view.getMonth(), 1).getDay();
+  const days = new Date(view.getFullYear(), view.getMonth() + 1, 0).getDate();
+  const chooseDate = (day: number) => { const next = `${view.getFullYear()}-${String(view.getMonth() + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`; onChange(`${next}T${time || "08:00"}`); setCalendarOpen(false); };
+  return <fieldset className="min-w-0"><legend className="text-sm font-medium text-content">{label}{required ? " *" : ""}</legend><div className="mt-2 grid gap-3 sm:grid-cols-2"><div ref={timeRef} className="relative min-w-0"><label htmlFor="quiz-time-input" className="mb-1.5 block text-sm font-medium text-content-muted">{t("Giờ")}</label><span className="relative block"><Clock3 size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-brand" aria-hidden="true" /><input id="quiz-time-input" type="text" inputMode="numeric" placeholder="HH:MM" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" required={required || Boolean(date)} value={time} onFocus={() => setTimeOpen(true)} onKeyDown={(event) => { if (event.key === "Escape") setTimeOpen(false); }} onChange={(event) => onChange(`${date || localDateTime(new Date()).slice(0, 10)}T${event.target.value}`)} aria-label={t("Giờ")} aria-expanded={timeOpen} className="quiz-datetime-input min-h-11 w-full rounded-xl border border-line py-2 pl-10 pr-3 text-sm" /></span>{timeOpen && <div className="quiz-select-content absolute left-0 top-full z-[110] mt-2 max-h-56 w-full overflow-y-auto rounded-2xl border border-line bg-surface p-1.5 shadow-xl">{Array.from({ length: 48 }, (_, i) => `${String(Math.floor(i / 2)).padStart(2, "0")}:${i % 2 ? "30" : "00"}`).filter((item) => !time || item.includes(time) || time.length >= 5).map((item) => <button key={item} type="button" onClick={() => { onChange(`${date || localDateTime(new Date()).slice(0, 10)}T${item}`); setTimeOpen(false); }} aria-pressed={time === item} className="flex min-h-10 w-full items-center rounded-xl border border-transparent px-3 text-left text-sm hover:border-line hover:bg-surface-accent aria-pressed:border-brand aria-pressed:bg-surface-accent aria-pressed:font-semibold aria-pressed:text-brand">{item}</button>)}</div>}</div><div ref={calendarRef} className="relative min-w-0"><span className="mb-1.5 block text-sm font-medium text-content-muted">{t("Ngày")}</span><button type="button" aria-label={t("Ngày")} aria-expanded={calendarOpen} onClick={() => { if (!calendarOpen) setMonth(selected ?? new Date()); setCalendarOpen(!calendarOpen); }} className="quiz-select-trigger flex min-h-11 w-full items-center gap-3 rounded-xl border border-line px-4 py-2 text-left text-sm hover:border-brand focus-visible:ring-2 focus-visible:ring-focus"><CalendarDays size={18} className="text-brand" aria-hidden="true" />{selected ? selected.toLocaleDateString("vi-VN") : t("Chọn ngày")}</button>{calendarOpen && <div className="quiz-select-content absolute right-0 top-full z-[110] mt-2 w-full rounded-2xl border border-line bg-surface p-2 shadow-xl"><div className="mb-2 flex items-center justify-between"><button type="button" aria-label="Tháng trước" onClick={() => setMonth(new Date(view.getFullYear(), view.getMonth() - 1, 1))} className="rounded-lg px-2 py-1 hover:bg-surface-accent">‹</button><strong className="text-xs">{view.toLocaleDateString("vi-VN", { month: "long", year: "numeric" })}</strong><button type="button" aria-label="Tháng sau" onClick={() => setMonth(new Date(view.getFullYear(), view.getMonth() + 1, 1))} className="rounded-lg px-2 py-1 hover:bg-surface-accent">›</button></div><div className="grid grid-cols-7 gap-0.5 text-center text-xs text-content-muted">{["CN", "T2", "T3", "T4", "T5", "T6", "T7"].map((name) => <span key={name} className="py-1">{name}</span>)}</div><div className="grid grid-cols-7 gap-0.5">{Array.from({ length: firstDay }, (_, i) => <span key={`empty-${i}`} />)}{Array.from({ length: days }, (_, i) => <button key={i} type="button" onClick={() => chooseDate(i + 1)} aria-label={`${i + 1}/${view.getMonth() + 1}/${view.getFullYear()}`} aria-pressed={selected?.getDate() === i + 1 && selected.getMonth() === view.getMonth() && selected.getFullYear() === view.getFullYear()} className="flex aspect-square w-full items-center justify-center rounded-lg text-xs hover:bg-surface-accent aria-pressed:bg-brand aria-pressed:text-white">{i + 1}</button>)}</div></div>}</div></div></fieldset>;
 }
 function QuizSurface({ fullPage, title, onClose, children }: { fullPage: boolean; title: string; onClose: () => void; children: ReactNode }) {
   if (!fullPage) return <Modal title={title} closeLabel="Đóng" onClose={onClose} wide>{children}</Modal>;
@@ -97,9 +112,8 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   const [collapsedQuestionIds, setCollapsedQuestionIds] = useState<Set<string>>(() => new Set());
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [promptText, setPromptText] = useState("");
+  const [promptDocument, setPromptDocument] = useState<PromptDocument>(emptyPrompt);
   const [promptOpen, setPromptOpen] = useState(false);
-  const [promptImages, setPromptImages] = useState<PromptImage[]>([]);
   const [uploading, setUploading] = useState(false);
   const [duration, setDuration] = useState(30);
   const [expiresAt, setExpiresAt] = useState("");
@@ -127,6 +141,50 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   const [detailQuiz, setDetailQuiz] = useState<QuizRow | null>(null);
   const [detail, setDetail] = useState<QuizDetail | null>(null);
   const [detailError, setDetailError] = useState("");
+  const [draftOwner, setDraftOwner] = useState<string | null>(null);
+  const [draftCandidate, setDraftCandidate] = useState<SavedDraft | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftStatus, setDraftStatus] = useState("");
+  const draftKey = draftOwner && (mode === "create" || mode === "edit" && params.id) ? `quiz-draft:${draftOwner}:${mode === "create" ? "new" : params.id}` : null;
+  useEffect(() => { if (mode !== "create" && mode !== "edit") return; void fetch("/api/auth/me", { cache: "no-store" }).then(async (response) => { if (response.ok) setDraftOwner((await response.json()).user.id); }); }, [mode]);
+  useEffect(() => {
+    if (!draftKey || !formOpen) return;
+    setDraftReady(false);
+    try {
+      if (mode === "create" && sessionStorage.getItem("quiz-import-override")) { sessionStorage.removeItem("quiz-import-override"); localStorage.removeItem(draftKey); setDraftReady(true); return; }
+      const raw = localStorage.getItem(draftKey);
+      if (raw) {
+        const draft = JSON.parse(raw) as SavedDraft;
+        if (draft.savedAt > Date.now() - DRAFT_TTL && Array.isArray(draft.questions) && draft.promptDocument?.type === "doc") setDraftCandidate(draft);
+        else localStorage.removeItem(draftKey);
+      }
+    } catch { localStorage.removeItem(draftKey); }
+    setDraftReady(true);
+  }, [draftKey, formOpen]);
+  useEffect(() => {
+    if (!draftKey || !formOpen || !draftReady || draftCandidate) return;
+    const draft: SavedDraft = { savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions };
+    const timer = window.setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey, JSON.stringify(draft));
+        setDraftStatus("Đã lưu bản nháp");
+        if (promptImages(promptDocument).length) void fetch("/api/teacher/assets/reserve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: promptImages(promptDocument) }) }).then((response) => { if (!response.ok) setDraftStatus("Đã lưu bản nháp, nhưng chưa giữ được ảnh tạm."); }).catch(() => setDraftStatus("Đã lưu bản nháp, nhưng chưa giữ được ảnh tạm."));
+      } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); }
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [draftKey, formOpen, draftReady, draftCandidate, title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions]);
+  useEffect(() => {
+    if (!draftKey || !formOpen || !draftReady || draftCandidate) return;
+    const flush = () => { try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions } satisfies SavedDraft)); } catch { /* The visible status reports quota errors during autosave. */ } };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [draftKey, formOpen, draftReady, draftCandidate, title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions]);
+  function restoreDraft() {
+    if (!draftCandidate) return;
+    setTitle(draftCandidate.title); setDescription(draftCandidate.description); setPromptDocument(draftCandidate.promptDocument); setDuration(draftCandidate.duration); setExpiresAt(draftCandidate.expiresAt); setSubject(draftCandidate.subject); setGradeLevel(draftCandidate.gradeLevel); setQuestions(draftCandidate.questions);
+    setDraftCandidate(null); setDraftStatus("Đã khôi phục bản nháp");
+  }
+  function discardDraft() { if (draftKey) localStorage.removeItem(draftKey); setDraftCandidate(null); setDraftStatus(""); }
   const t = useTranslation();
   useEffect(() => { void fetch("/api/teacher/catalogs", { cache: "no-store" }).then(async (response) => { if (response.ok) { const data = await response.json(); setSubjects(data.subjects); setGradeLevels(data.gradeLevels); } }); }, []);
 
@@ -144,9 +202,10 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       const stored = sessionStorage.getItem("quiz-import-draft");
       if (stored) {
         sessionStorage.removeItem("quiz-import-draft");
+        sessionStorage.setItem("quiz-import-override", "1");
         try {
           const draft = JSON.parse(stored) as ImportDraft;
-          setTitle(draft.title); setDescription(draft.description); setPromptText(draft.promptText); setPromptOpen(Boolean(draft.promptText)); setPromptImages([]); setDuration(draft.durationMinutes);
+          setTitle(draft.title); setDescription(draft.description); setPromptDocument(draft.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(draft.promptDocument?.content?.length)); setDuration(draft.durationMinutes);
           setExpiresAt(draft.linkExpiresAt ? localDateTime(new Date(draft.linkExpiresAt)) : "");
           setQuestions(draft.questions.map((question) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, points: question.points, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1 })));
           setCollapsedQuestionIds(new Set());
@@ -186,30 +245,13 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       const draft = payload.draft;
       if (mode === "list") { sessionStorage.setItem("quiz-import-draft", JSON.stringify(draft)); router.push("/teacher/quizzes/new"); return; }
       setSubject(""); setGradeLevel("");
-      setTitle(draft.title); setDescription(draft.description); setPromptText(draft.promptText); setPromptOpen(Boolean(draft.promptText)); setPromptImages([]); setDuration(draft.durationMinutes);
+      setTitle(draft.title); setDescription(draft.description); setPromptDocument(draft.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(draft.promptDocument?.content?.length)); setDuration(draft.durationMinutes);
       setExpiresAt(draft.linkExpiresAt ? new Date(new Date(draft.linkExpiresAt).getTime() - new Date(draft.linkExpiresAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
       setQuestions(draft.questions.map((question) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, points: question.points, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1 })));
       setCollapsedQuestionIds(new Set());
       setImportErrors([]); setFormError(""); setEditing(null); setFormOpen(true);
     } catch { setImportErrors([{ sheet: "File", row: 0, column: "file", message: t("Không đọc được file Excel.") }]); }
     finally { setImportBusy(false); }
-  }
-
-  async function uploadImages(files: FileList | null) {
-    if (!files?.length) return;
-    if (promptImages.length + files.length > 10) { setFormError(t("Tối đa 10 ảnh cho đề bài.")); return; }
-    setUploading(true); setFormError("");
-    try {
-      for (const file of Array.from(files)) {
-        if (![/^image\/(png|jpeg|webp)$/.test(file.type), file.size <= 5_000_000].every(Boolean)) throw new Error(t("Ảnh phải là PNG, JPEG hoặc WebP và không quá 5 MB."));
-        const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1]); reader.onerror = reject; reader.readAsDataURL(file); });
-        const response = await fetch("/api/teacher/assets", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }) });
-        if (!response.ok) throw new Error(t("Không tải được ảnh đề bài."));
-        const asset = await response.json() as { id: string };
-        setPromptImages((items) => [...items, { id: asset.id, alt: file.name.replace(/\.[^.]+$/, "") }]);
-      }
-    } catch (reason) { setFormError(reason instanceof Error ? reason.message : t("Không tải được ảnh đề bài.")); }
-    finally { setUploading(false); }
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
@@ -224,7 +266,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     setQuestionError(null);
     setBusy(true); setFormError(""); setFormErrorTarget("");
     const payload = {
-      title, description, promptText, promptImages, durationMinutes: duration,
+      title, description, promptDocument, durationMinutes: duration,
       subjectId: subjects.find((item) => item.name === subject)?.id ?? null,
       gradeLevelId: gradeLevels.find((item) => item.name === gradeLevel)?.id ?? null,
       subject, gradeLevel,
@@ -245,6 +287,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     setBusy(false);
     if (!response.ok) { setFormError(t("Chưa lưu được quiz. Kiểm tra câu trắc nghiệm có ít nhất hai lựa chọn và đáp án đúng hợp lệ.")); return; }
     const result = await response.json().catch(() => ({}));
+    if (draftKey) localStorage.removeItem(draftKey);
     if (mode !== "list") { router.push(`/teacher/quizzes/${editing ?? result.quiz?.id}`); return; }
     setNotice(!editing && result.link ? `${t("Đã tạo quiz. Link:")} ${window.location.origin}${result.link}` : t("Đã lưu quiz."));
     clearForm();
@@ -252,8 +295,8 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     await load();
   }
 
-  function clearForm() { setEditing(null); setTitle(""); setDescription(""); setPromptText(""); setPromptOpen(false); setPromptImages([]); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
-  function closeForm() { if (busy || importBusy) return; if (mode !== "list") { router.push(editing ? `/teacher/quizzes/${editing}` : "/teacher"); return; } setFormOpen(false); setFormError(""); setImportErrors([]); clearForm(); }
+  function clearForm() { setEditing(null); setTitle(""); setDescription(""); setPromptDocument(emptyPrompt); setPromptOpen(false); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
+  function closeForm() { if (busy || importBusy) return; if (draftKey && draftReady && !draftCandidate) { try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions } satisfies SavedDraft)); } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); } } if (mode !== "list") { router.push(editing ? `/teacher/quizzes/${editing}` : "/teacher"); return; } setFormOpen(false); setFormError(""); setImportErrors([]); clearForm(); }
   function newQuiz() { router.push("/teacher/quizzes/new"); }
 
   async function edit(quiz: QuizRow) {
@@ -261,7 +304,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     const response = await fetch(`/api/teacher/quizzes/${quiz.id}`);
     if (!response.ok) { setNotice(t("Không tải được quiz để sửa.")); return; }
     const result = await response.json();
-    setEditing(quiz.id); setTitle(result.quiz.title); setDescription(result.quiz.description); setPromptText(result.quiz.promptText ?? ""); setPromptOpen(Boolean(result.quiz.promptText || result.quiz.promptImages?.length)); setPromptImages(result.quiz.promptImages ?? []); setDuration(result.quiz.durationMinutes); setSubject(result.quiz.subject ?? ""); setGradeLevel(result.quiz.gradeLevel ?? "");
+    setEditing(quiz.id); setTitle(result.quiz.title); setDescription(result.quiz.description); setPromptDocument(result.quiz.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(result.quiz.promptDocument?.content?.length)); setDuration(result.quiz.durationMinutes); setSubject(result.quiz.subject ?? ""); setGradeLevel(result.quiz.gradeLevel ?? "");
     setExpiresAt(result.quiz.linkExpiresAt ? localDateTime(new Date(result.quiz.linkExpiresAt)) : "");
     setQuestions(result.questions.map((question: { type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1, points: question.points })));
     setCollapsedQuestionIds(new Set());
@@ -343,7 +386,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
         {detail.quiz.subject && <p className="text-sm"><strong>{t("Môn học")}:</strong> {detail.quiz.subject}</p>}
         {detail.quiz.gradeLevel && <p className="text-sm"><strong>{t("Khối lớp")}:</strong> {detail.quiz.gradeLevel}</p>}
         <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Trạng thái")}</p><p className="mt-1 font-semibold">{detail.quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}</p></div><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Thời lượng")}</p><p className="mt-1 font-semibold">{detail.quiz.durationMinutes} {t("phút")}</p></div><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Hạn dùng link")}</p><p className="mt-1 font-semibold">{detail.quiz.linkExpiresAt ? formatTimeFirst(detail.quiz.linkExpiresAt) : t("Không có hạn")}</p></div></div>
-        {(detail.quiz.promptText || detail.quiz.promptImages?.length) && <section><h4 className="font-semibold">{t("Đề bài")}</h4>{detail.quiz.promptText && <p className="mt-2 whitespace-pre-wrap text-sm">{detail.quiz.promptText}</p>}{detail.quiz.promptImages && <div className="mt-3 grid gap-3 sm:grid-cols-2">{detail.quiz.promptImages.map((image) => <img key={image.id} src={`/api/public/assets/${image.id}`} alt={image.alt} className="max-h-64 w-full rounded-xl border border-line object-contain" />)}</div>}</section>}
+        {Boolean(detail.quiz.promptDocument?.content?.length) && <section><h4 className="font-semibold">{t("Đề bài")}</h4><PromptView document={detail.quiz.promptDocument!} /></section>}
         <section><h4 className="font-semibold">{t("Câu hỏi")} ({detail.questions.length})</h4><div className="mt-3 space-y-3">{detail.questions.map((question, index) => <div key={question.id} className="rounded-xl border border-line p-4"><p className="text-sm font-semibold text-content-muted">{t("Câu")} {index + 1} · {question.type === "choice" ? t("Trắc nghiệm") : t("Tự luận")} · {question.points} {t("điểm")}</p><p className="mt-2 whitespace-pre-wrap font-medium">{question.prompt}</p>{question.type === "choice" && <ol className="mt-3 space-y-1 pl-5 text-sm">{question.options.map((option, optionIndex) => <li key={optionIndex} className={`list-decimal ${optionIndex === question.correctOption ? "font-semibold text-emerald-700" : ""}`}>{option}{optionIndex === question.correctOption ? ` · ${t("Đáp án đúng")}` : ""}</li>)}</ol>}</div>)}</div></section>
         <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" onClick={() => void copyLink(detail.quiz)}>{t("Sao chép link")}</Button><Button type="button" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>{t("Sửa quiz")}</Button></div>
       </div>}
@@ -364,16 +407,18 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
         <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" disabled={linkBusy} onClick={() => setLinkQuiz(null)}>{t("Hủy")}</Button><Button type="submit" disabled={linkBusy}>{linkBusy ? t("Đang lưu…") : linkQuiz.status === "inactive" ? t("Mở lại quiz") : t("Lưu hạn mới")}</Button></div>
       </form>
     </Modal>}
+    {draftCandidate && <Modal title="Bản nháp quiz" onClose={discardDraft}><p>Bạn có bản nháp lưu lúc {new Date(draftCandidate.savedAt).toLocaleString("vi-VN")}. Khôi phục để tiếp tục làm?</p><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="outline" onClick={discardDraft}>Bỏ bản nháp</Button><Button type="button" onClick={restoreDraft}>Khôi phục</Button></div></Modal>}
     {formOpen && <QuizSurface fullPage={mode !== "list"} title={editing ? t("Sửa quiz") : t("Tạo quiz mới")} onClose={closeForm}><form onSubmit={save} className={mode === "create" ? "mx-auto max-w-3xl" : "lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-6"}>{mode !== "create" && <nav aria-label={t("Mục lục tạo quiz")} className="mb-6 rounded-xl border border-line bg-surface-subtle p-3 lg:sticky lg:top-6 lg:mb-0"><p className="px-2 pb-2 text-sm font-bold">{t("Nội dung bài quiz")}</p><select aria-label={t("Mục lục tạo quiz")} defaultValue="" onChange={(event) => document.getElementById(event.target.value)?.scrollIntoView({ behavior: "smooth" })} className="w-full rounded-xl border border-line px-3 py-2 lg:hidden"><option value="" disabled>{t("Chọn mục")}</option><option value="quiz-info">{t("Thông tin quiz")}</option><option value="quiz-classes">{t("Môn học và lớp")} ()</option><option value="quiz-questions">{t("Câu hỏi")} ({questions.length})</option><option value="quiz-prompt">{t("Đề bài")}</option></select><div className="hidden gap-1 lg:grid"><a href="#quiz-info" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Thông tin quiz")}</a><a href="#quiz-classes" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Môn học và lớp")} ()</a><a href="#quiz-questions" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Câu hỏi")} ({questions.length})</a><a href="#quiz-prompt" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Đề bài")}</a></div></nav>}<div className="min-w-0 space-y-6">
+      {draftStatus && <p role="status" className="text-sm text-content-muted">{draftStatus}</p>}
       {formError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{formError}{formErrorTarget && <a href={`#${formErrorTarget}`} className="ml-2 font-semibold underline">{t("Đến phần cần sửa")}</a>}</p>}
 
       <h3 id="quiz-info" className="scroll-mt-6 flex items-center gap-3 border-b border-line pb-3 text-lg font-bold">{mode === "create" && <span className="flex size-8 shrink-0 items-center justify-center rounded-full ds-gradient text-sm text-white">1</span>}{t("Thông tin quiz")}</h3>
       <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">{t("Tên quiz")}<input required value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label><label className="text-sm font-medium">{t("Thời lượng (phút)")}<input required type="number" min={1} max={1440} value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>{editing && <label className="text-sm font-medium sm:col-span-2">{t("Mô tả")}<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>}{<div className="sm:col-span-2"><TimeFirstDateTime label={t("Hạn dùng link (để trống nếu không hết hạn)")} value={expiresAt} onChange={setExpiresAt} t={t} /></div>}</div>
-      <section id="quiz-classes" className="scroll-mt-6 rounded-2xl border border-line bg-surface p-4"><h3 className="font-semibold">{t("Môn học và khối lớp")}</h3><div className="mt-3 grid gap-4 sm:grid-cols-2">{([["Môn học", subject, setSubject, subjects], ["Khối lớp", gradeLevel, setGradeLevel, gradeLevels]] as const).map(([label, value, setter, items]) => <label key={label} className="text-sm font-medium">{t(label)}<select required value={value} onChange={(event) => setter(event.target.value)} className="mt-2 w-full rounded-xl border border-line px-4 py-3"><option value="">{t("Chọn")} {t(label)}</option>{value && !items.some((item) => item.name === value) && <option value={value}>{value} ({t("Đã xóa")})</option>}{items.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></label>)}</div></section>
+      <section id="quiz-classes" className="scroll-mt-6"><div className="grid gap-4 sm:grid-cols-2">{([["Môn học", subject, setSubject, subjects], ["Khối lớp", gradeLevel, setGradeLevel, gradeLevels]] as const).map(([label, value, setter, items]) => <div key={label} className="text-sm font-medium"><span className="mb-2 block">{t(label)}</span><Select value={value} onValueChange={setter} ariaLabel={t(label)} options={[{ value: "", label: `${t("Chọn")} ${t(label)}` }, ...(value && !items.some((item) => item.name === value) ? [{ value, label: `${value} (${t("Đã xóa")})` }] : []), ...items.map((item) => ({ value: item.name, label: item.name }))]} /></div>)}</div></section>
       <div id="quiz-questions" className="scroll-mt-6 border-t border-line pt-6"><h3 className="flex items-center gap-3 text-lg font-bold">{mode === "create" && <span className="flex size-8 shrink-0 items-center justify-center rounded-full ds-gradient text-sm text-white">2</span>}{t("Câu hỏi")}</h3><p className="mt-1 text-sm text-content-muted">{t("Chọn loại câu hỏi, nhập nội dung và đáp án bên dưới.")}</p></div>
       <DragDropProvider onDragEnd={(event) => { if (event.canceled || !isSortable(event.operation.source)) return; const { initialIndex, index } = event.operation.source; if (initialIndex === index) return; setQuestions((current) => { const next = [...current]; const [moved] = next.splice(initialIndex, 1); next.splice(index, 0, moved); return next; }); setQuestionError(null); setFormError(""); setFormErrorTarget(""); }}><div className="space-y-4">{questions.map((question, index) => <QuestionEditor key={question.id} question={question} index={index} count={questions.length} collapsed={collapsedQuestionIds.has(question.id)} toggle={() => toggleQuestion(question.id)} duplicate={() => duplicateQuestion(index)} error={questionError === index ? questionErrorMessage : undefined} t={t} update={(changes) => updateQuestion(index, changes)} remove={() => { setQuestions((items) => items.filter((_, i) => i !== index)); setQuestionError(null); }} />)}</div></DragDropProvider>
       <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("choice")}>{t("+ Câu trắc nghiệm")}</Button><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("essay")}>{t("+ Câu tự luận")}</Button></div>
-      <details id="quiz-prompt" className="scroll-mt-6 rounded-2xl border border-line bg-surface-subtle p-4" open={promptOpen} onToggle={(event) => setPromptOpen(event.currentTarget.open)}><summary className="cursor-pointer font-semibold">{t("Đề bài (tùy chọn)")}</summary><div><p className="mt-1 text-sm text-content-muted">{t("Học sinh xem đề bài cạnh phần câu hỏi.")}</p><label className="mt-4 block text-sm font-medium">{t("Nội dung đề bài")}<textarea value={promptText} onChange={(event) => setPromptText(event.target.value)} maxLength={30000} rows={5} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label><label className="mt-4 block text-sm font-medium">{t("Ảnh đề bài (tối đa 10 ảnh, 5 MB/ảnh)")}<input type="file" accept="image/png,image/jpeg,image/webp" multiple disabled={uploading} onChange={(event) => { void uploadImages(event.target.files); event.target.value = ""; }} className="mt-2 block w-full text-sm" /></label>{uploading && <p role="status" className="mt-2 text-sm">{t("Đang tải ảnh…")}</p>}<div className="mt-3 grid gap-3">{promptImages.map((image, index) => <div key={image.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3"><img src={`/api/public/assets/${image.id}`} alt={image.alt} className="h-20 w-20 rounded-lg object-contain" /><label className="min-w-40 flex-1 text-sm">{t("Mô tả ảnh")}<input required value={image.alt} onChange={(event) => setPromptImages((items) => items.map((item, i) => i === index ? { ...item, alt: event.target.value } : item))} className="mt-1 w-full rounded-lg border border-line px-3 py-2" /></label><div className="flex gap-2"><button type="button" disabled={index === 0} onClick={() => setPromptImages((items) => { const next = [...items]; [next[index - 1], next[index]] = [next[index], next[index - 1]]; return next; })} className="rounded-lg border border-line px-2 py-2">↑</button><button type="button" disabled={index === promptImages.length - 1} onClick={() => setPromptImages((items) => { const next = [...items]; [next[index], next[index + 1]] = [next[index + 1], next[index]]; return next; })} className="rounded-lg border border-line px-2 py-2">↓</button><button type="button" onClick={() => setPromptImages((items) => items.filter((_, i) => i !== index))} className="rounded-lg border border-line px-2 py-2">{t("Xóa")}</button></div></div>)}</div></div></details>
+      <details id="quiz-prompt" className="scroll-mt-6 rounded-2xl border border-line bg-surface-subtle p-4" open={promptOpen} onToggle={(event) => setPromptOpen(event.currentTarget.open)}><summary className="cursor-pointer font-semibold">{t("Đề bài (tùy chọn)")}</summary><div className="mt-4"><PromptEditor value={promptDocument} onChange={setPromptDocument} /></div></details>
       <div className="sticky bottom-0 z-10 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-5 py-4 sm:-mx-7 sm:px-7"><p className="text-sm text-content-muted">{questions.length} {t("câu hỏi")}</p><div className="flex gap-2"><Button type="button" variant="outline" onClick={closeForm} disabled={busy || importBusy}>{t("Hủy")}</Button><Button type="submit" disabled={busy || uploading || importBusy}>{busy ? t("Đang lưu…") : editing ? t("Lưu thay đổi") : t("Tạo quiz")}</Button></div></div>
     </div></form></QuizSurface>}
     {mode === "list" && <section className="mt-8 rounded-2xl border border-line bg-surface p-5 sm:p-7"><div className="flex flex-col gap-3 sm:flex-row"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Tìm quiz")} className="min-w-0 flex-1 rounded-xl border border-line px-4 py-3" /><Select value={status} onValueChange={setStatus} ariaLabel={t("Tất cả trạng thái")} options={[{ value: "", label: t("Tất cả trạng thái") }, { value: "active", label: t("Đang mở") }, { value: "inactive", label: t("Đã ngừng") }]} className="sm:w-56" /></div>

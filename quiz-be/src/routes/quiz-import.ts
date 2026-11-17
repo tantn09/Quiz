@@ -102,7 +102,7 @@ export async function quizImportRoutes(app: FastifyInstance): Promise<void> {
     if (!Number.isInteger(duration)) errors.push({ sheet: "Quiz", row: 4, column: "durationMinutes", message: "Thời lượng cần là số nguyên." });
     const linkExpiresAt = fields.linkExpiresAt ? new Date(fields.linkExpiresAt) : null;
     if (fields.linkExpiresAt && (!/([+-]\d{2}:\d{2}|Z)$/.test(fields.linkExpiresAt) || Number.isNaN(linkExpiresAt!.getTime()))) errors.push({ sheet: "Quiz", row: 5, column: "linkExpiresAt", message: "Hạn link cần là ISO 8601 có múi giờ." });
-    const draft = { title: fields.title ?? "", description: fields.description ?? "", promptText: fields.promptText ?? "", promptImages: [], durationMinutes: duration, linkExpiresAt: linkExpiresAt && !Number.isNaN(linkExpiresAt.getTime()) ? linkExpiresAt.toISOString() : null, questions: parsedQuestions };
+    const draft = { title: fields.title ?? "", description: fields.description ?? "", promptDocument: { type: "doc", content: fields.promptText ? [{ type: "paragraph", content: [{ type: "text", text: fields.promptText }] }] : [] }, durationMinutes: duration, linkExpiresAt: linkExpiresAt && !Number.isNaN(linkExpiresAt.getTime()) ? linkExpiresAt.toISOString() : null, questions: parsedQuestions };
     const validated = quizInput.safeParse(draft);
     if (!validated.success) for (const issue of validated.error.issues) {
       const [root, index, field] = issue.path;

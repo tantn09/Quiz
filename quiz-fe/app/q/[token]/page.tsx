@@ -4,11 +4,14 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useTranslation } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
+import { PromptView } from "@/components/prompt-view";
+import type { JSONContent } from "@tiptap/core";
 import { Card } from "@/components/ui/card";
 import { Input, Textarea } from "@/components/ui/field";
+import { Modal } from "@mantine/core";
 
 type QuizQuestion = { id: string; position: number; type: "choice" | "essay"; prompt: string; options: string[]; points: number };
-type QuizInfo = { title: string; description: string; promptText: string; promptImages: { id: string; alt: string }[]; subject?: string | null; gradeLevel?: string | null };
+type QuizInfo = { title: string; description: string; promptDocument: JSONContent; subject?: string | null; gradeLevel?: string | null };
 type Attempt = { id: string; dueAt: string; submitted: boolean };
 type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean };
 
@@ -29,7 +32,7 @@ export default function StudentQuizPage() {
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
   const [pending, setPending] = useState(false);
-  const [mobileTab, setMobileTab] = useState<"prompt" | "questions">("questions");
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
 
   const storageKey = useMemo(() => `quiz-attempt:${token}`, [token]);
 
@@ -37,7 +40,7 @@ export default function StudentQuizPage() {
     const response = await fetch(`/api/public/attempts/${state.attemptId}`, { headers: { "x-resume-token": state.resumeToken }, cache: "no-store" });
     if (!response.ok) throw new Error(t("Không thể khôi phục bài làm trên máy chủ."));
     const payload = await response.json();
-    setQuiz({ title: payload.quiz.title, description: payload.quiz.description, subject: payload.quiz.subject, gradeLevel: payload.quiz.gradeLevel, promptText: payload.prompt?.text ?? "", promptImages: payload.prompt?.images ?? [] });
+    setQuiz({ title: payload.quiz.title, description: payload.quiz.description, subject: payload.quiz.subject, gradeLevel: payload.quiz.gradeLevel, promptDocument: payload.prompt ?? { type: "doc", content: [] } });
     setQuestions(payload.questions);
     setAnswers({ ...payload.answers, ...state.answers });
     setAttempt(payload.attempt);
@@ -153,7 +156,7 @@ export default function StudentQuizPage() {
       localStorage.setItem(storageKey, JSON.stringify(state));
       setSaved(state);
       setAttempt({ ...payload.attempt, submitted: false });
-      setQuiz({ title: payload.quiz.title, description: "", promptText: payload.quiz.prompt?.text ?? "", promptImages: payload.quiz.prompt?.images ?? [] });
+      setQuiz({ title: payload.quiz.title, description: "", promptDocument: payload.quiz.prompt ?? { type: "doc", content: [] } });
       setQuestions(payload.questions);
       setSeconds(Math.max(0, Math.ceil((new Date(payload.attempt.dueAt).getTime() - Date.now()) / 1000)));
     } catch (reason) {
@@ -168,34 +171,43 @@ export default function StudentQuizPage() {
   }
 
   if (loading) return <main className="mx-auto max-w-3xl p-8 text-content-muted">{t("Đang tải bài quiz…")}</main>;
-  const hasPrompt = Boolean(attempt && (quiz?.promptText || quiz?.promptImages.length));
+  const hasPrompt = Boolean(attempt && (quiz?.promptDocument?.content?.length));
+  const answered = questions.filter((question) => Boolean(answers[question.id]?.trim())).length;
+  const remaining = questions.length - answered;
   return (
-    <main className={`mx-auto px-4 py-8 sm:px-6 sm:py-12 ${hasPrompt ? "max-w-[1500px]" : "max-w-3xl"}`}>
-      {attempt && !done && <div className="sticky top-3 z-10 mb-5 w-fit rounded-full border border-blue-200 bg-surface px-5 py-3 font-bold text-brand shadow-sm" aria-live="polite">{t("Còn")} {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</div>}
-      {hasPrompt && <div role="tablist" aria-label={t("Nội dung bài quiz")} className="mb-4 grid grid-cols-2 rounded-xl border border-line bg-surface p-1 lg:hidden"><button type="button" role="tab" aria-selected={mobileTab === "prompt"} onClick={() => setMobileTab("prompt")} className={`rounded-lg px-3 py-3 font-semibold ${mobileTab === "prompt" ? "ds-gradient text-white" : "text-content"}`}>{t("Đề bài")}</button><button type="button" role="tab" aria-selected={mobileTab === "questions"} onClick={() => setMobileTab("questions")} className={`rounded-lg px-3 py-3 font-semibold ${mobileTab === "questions" ? "ds-gradient text-white" : "text-content"}`}>{t("Câu hỏi")}</button></div>}
+    <main className={`quiz-student mx-auto px-4 py-8 sm:px-6 sm:py-12 ${hasPrompt ? "max-w-[1320px]" : "max-w-3xl"} ${!attempt ? "flex min-h-dvh flex-col justify-center" : ""}`}>
+      {attempt && !done && <div className="quiz-student-status sticky top-3 z-10 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 shadow-sm"><span className="text-sm font-semibold text-content-muted">{t("Đã trả lời")} <strong className="text-brand">{answered}/{questions.length}</strong></span><span className={`rounded-full px-3 py-1 font-bold ${seconds <= 300 ? "ds-warning" : "bg-surface-accent text-brand"}`} aria-live={seconds <= 300 ? "polite" : "off"}>{t("Còn")} {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span></div>}
       <div className={hasPrompt ? "grid gap-5 lg:grid-cols-2 lg:items-start" : ""}>
-      {hasPrompt && <Card className={`rounded-3xl p-6 sm:p-9 lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto ${mobileTab === "questions" ? "hidden lg:block" : ""}`}><h2 className="text-xl font-bold">{t("Đề bài")}</h2>{quiz?.promptText && <p className="mt-4 whitespace-pre-wrap leading-7">{quiz.promptText}</p>}<div className="mt-5 space-y-5">{quiz?.promptImages.map((image) => <a key={image.id} href={`/api/public/assets/${image.id}`} target="_blank" rel="noopener noreferrer" className="block rounded-xl border border-line p-2 focus-visible:outline-2 focus-visible:outline-focus"><img src={`/api/public/assets/${image.id}`} alt={image.alt} className="h-auto max-h-[70vh] w-full object-contain" /><span className="mt-2 block text-sm text-content-muted">{image.alt}</span></a>)}</div></Card>}
-      <Card className={`rounded-3xl p-6 sm:p-9 ${hasPrompt ? "lg:max-h-[calc(100dvh-9rem)] lg:overflow-y-auto" : ""} ${hasPrompt && mobileTab === "prompt" ? "hidden lg:block" : ""}`}>
+      {hasPrompt && <><details className="quiz-student-prompt rounded-2xl border border-line bg-surface p-5 lg:hidden"><summary className="cursor-pointer font-bold text-brand">{t("Đề bài")}</summary>{quiz?.promptDocument && <PromptView document={quiz.promptDocument} />}</details><Card className="hidden rounded-3xl p-6 sm:p-9 lg:sticky lg:top-24 lg:block lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto"><h2 className="text-xl font-bold">{t("Đề bài")}</h2>{quiz?.promptDocument && <PromptView document={quiz.promptDocument} />}</Card></>}
+      <Card className="rounded-3xl p-5 sm:p-8">
         <p className="text-sm font-semibold text-brand">{t("BÀI QUIZ")}</p>
         <h1 className="mt-2 text-3xl font-bold">{quiz?.title ?? t("Không mở được quiz")}</h1>
         {quiz?.subject && <p className="mt-2 text-sm font-semibold text-brand">{t("Môn học")}: {quiz.subject}</p>}{quiz?.gradeLevel && <p className="mt-1 text-sm font-semibold text-brand">{t("Khối lớp")}: {quiz.gradeLevel}</p>}
         {quiz?.description && <p className="mt-3 whitespace-pre-wrap text-content-muted">{quiz.description}</p>}
-        {error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
-        {!attempt && !error && <form onSubmit={start} className="mt-7 grid gap-4 sm:grid-cols-2">
-          <label className="text-sm font-medium">{t("Họ và tên")}<Input required value={name} onChange={(event) => setName(event.target.value)} className="mt-2" /></label>
-          <label className="text-sm font-medium">{t("Lớp")}<Input required value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2" /></label>
-          <Button disabled={busy} className="sm:col-span-2">{busy ? t("Đang bắt đầu…") : t("Bắt đầu làm bài")}</Button>
+        {attempt && error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
+        {!attempt && quiz && <form onSubmit={start} className="quiz-student-entry mt-7 rounded-2xl border border-line bg-surface-subtle p-5 sm:p-7">
+          <h2 className="text-lg font-bold">{t("Thông tin học sinh")}</h2>
+          <p className="mt-1 text-sm text-content-muted">{t("Nhập tên và lớp để bắt đầu làm bài.")}</p>
+          <div className="mt-5 grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm font-semibold">{t("Họ và tên")}<Input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className="mt-2 bg-surface" /></label>
+            <label className="block text-sm font-semibold">{t("Lớp")}<Input required autoComplete="off" value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2 bg-surface" /></label>
+          </div>
+          {error && <p role="alert" className="mt-4 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
+          <Button type="submit" disabled={busy} className="mt-5 w-full sm:w-auto">{busy ? t("Đang bắt đầu…") : t("Bắt đầu làm bài")}</Button>
         </form>}
+        {!attempt && !quiz && error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
         {attempt && done && <p className={`mt-7 rounded-2xl p-5 font-semibold ${pending ? "ds-warning" : "ds-success"}`}>{pending ? t("Bài làm đã được chốt trên thiết bị và sẽ gửi khi có kết nối mạng.") : t("Bài làm đã được chốt. Cảm ơn bạn!")}</p>}
-        {attempt && !done && <form onSubmit={(event) => { event.preventDefault(); void submit(answers); }} className="mt-8 space-y-5">
-          {questions.map((question, index) => <fieldset key={question.id} className="rounded-2xl border border-line p-5">
+        {attempt && !done && <form onSubmit={(event) => { event.preventDefault(); setConfirmSubmit(true); }} className="mt-8 space-y-5">
+          <div className="rounded-xl bg-surface-accent px-4 py-3 text-sm font-semibold text-brand">{t("Câu hỏi")} · {answered}/{questions.length} {t("Đã trả lời").toLowerCase()}</div>
+          {questions.map((question, index) => <fieldset key={question.id} className="quiz-student-question rounded-2xl border border-line bg-surface p-4 sm:p-5">
             <legend className="px-2 font-semibold">{t("Câu")} {index + 1} <span className="font-normal text-content-muted">({question.points} {t("điểm")})</span></legend>
             <p className="whitespace-pre-wrap leading-7">{question.prompt}</p>
-            {question.type === "choice" ? <div className="mt-4 space-y-2">{question.options.map((option, optionIndex) => <label key={optionIndex} className="flex cursor-pointer items-start gap-3 rounded-xl border border-line p-3 hover:bg-surface-subtle"><input type="radio" name={question.id} checked={answers[question.id] === String(optionIndex)} onChange={() => setAnswer(question.id, String(optionIndex))} className="mt-1" /><span>{option}</span></label>)}</div> : <Textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswer(question.id, event.target.value)} rows={5} className="mt-4" placeholder={t("Nhập câu trả lời của bạn")} />}
+            {question.type === "choice" ? <div className="mt-4 space-y-2">{question.options.map((option, optionIndex) => <label key={optionIndex} className={`quiz-student-option flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${answers[question.id] === String(optionIndex) ? "border-brand bg-surface-accent" : "border-line bg-surface hover:bg-surface-subtle"}`}><input type="radio" name={question.id} checked={answers[question.id] === String(optionIndex)} onChange={() => setAnswer(question.id, String(optionIndex))} className="mt-1" /><span>{option}</span></label>)}</div> : <Textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswer(question.id, event.target.value)} rows={5} className="mt-4" placeholder={t("Nhập câu trả lời của bạn")} />}
           </fieldset>)}
           <Button className="w-full">{t("Nộp bài")}</Button>
         </form>}
       </Card></div>
+      <Modal opened={confirmSubmit && !done} onClose={() => setConfirmSubmit(false)} title={t("Xác nhận nộp bài")} centered><p className="text-content-muted">{remaining > 0 ? `${t("Còn")} ${remaining} ${t("câu chưa trả lời")}.` : t("Bạn đã trả lời tất cả câu hỏi.")}</p><div className="mt-6 flex flex-wrap justify-end gap-3"><Button type="button" variant="outline" onClick={() => setConfirmSubmit(false)}>{t("Tiếp tục làm bài")}</Button><Button type="button" onClick={() => { setConfirmSubmit(false); void submit(answers); }}>{t("Nộp bài")}</Button></div></Modal>
     </main>
   );
 }

@@ -4,7 +4,8 @@ import { and, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm"
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
-import { questions, quizzes, submissions, quizAssets, subjects, gradeLevels, type PromptImage } from "../db/schema.js";
+import { promptDocumentSchema, promptImageIds } from "../prompt-document.js";
+import { questions, quizzes, submissions, quizAssets, subjects, gradeLevels } from "../db/schema.js";
 
 const questionInput = z.object({
   type: z.enum(["choice", "essay"]),
@@ -24,8 +25,7 @@ const questionInput = z.object({
 export const quizInput = z.object({
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(5000).default(""),
-  promptText: z.string().trim().max(30000).default(""),
-  promptImages: z.array(z.object({ id: z.string().uuid(), alt: z.string().trim().min(1).max(200) })).max(10).default([]),
+  promptDocument: promptDocumentSchema,
   durationMinutes: z.number().int().min(1).max(1440),
   linkExpiresAt: z.string().datetime().nullable().default(null),
   subjectId: z.string().uuid().nullable().default(null),
@@ -43,11 +43,11 @@ async function resolveLabels(data: z.infer<typeof quizInput>, existing?: typeof 
   return subjectName && gradeName ? { subject: subjectName, gradeLevel: gradeName } : null;
 }
 
-async function hasAssets(images: PromptImage[]): Promise<boolean> {
-  if (new Set(images.map((image) => image.id)).size !== images.length) return false;
-  if (!images.length) return true;
-  const rows = await db.select({ id: quizAssets.id }).from(quizAssets).where(inArray(quizAssets.id, images.map((image) => image.id)));
-  return rows.length === images.length;
+async function hasAssets(document: z.infer<typeof promptDocumentSchema>): Promise<boolean> {
+  const ids = [...new Set(promptImageIds(document))];
+  if (!ids.length) return true;
+  const rows = await db.select({ id: quizAssets.id }).from(quizAssets).where(inArray(quizAssets.id, ids));
+  return rows.length === ids.length;
 }
 
 export async function quizRoutes(app: FastifyInstance): Promise<void> {
@@ -67,15 +67,14 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
     const labels = await resolveLabels(parsed.data);
     if (!labels) return reply.code(400).send({ error: "invalid_catalog_selection" });
-    if (!(await hasAssets(parsed.data.promptImages))) return reply.code(400).send({ error: "invalid_assets" });
+    if (!(await hasAssets(parsed.data.promptDocument))) return reply.code(400).send({ error: "invalid_assets" });
     const linkToken = randomBytes(24).toString("base64url");
     const [created] = await db.transaction(async (tx) => {
       const [quiz] = await tx.insert(quizzes).values({
         teacherId: request.authUser!.id,
         title: parsed.data.title,
         description: parsed.data.description,
-        promptText: parsed.data.promptText,
-        promptImages: parsed.data.promptImages,
+        promptDocument: parsed.data.promptDocument,
         durationMinutes: parsed.data.durationMinutes,
         ...labels,
         linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null,
@@ -100,7 +99,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const parsed = quizInput.safeParse(request.body);
     if (!params.success || !parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.success ? undefined : parsed.error.flatten() });
-    if (!(await hasAssets(parsed.data.promptImages))) return reply.code(400).send({ error: "invalid_assets" });
+    if (!(await hasAssets(parsed.data.promptDocument))) return reply.code(400).send({ error: "invalid_assets" });
     const filters = [eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const updated = await db.transaction(async (tx) => {
@@ -108,7 +107,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       if (!existing) return null;
       const labels = await resolveLabels(parsed.data, existing);
       if (!labels) return null;
-      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptText: parsed.data.promptText, promptImages: parsed.data.promptImages, durationMinutes: parsed.data.durationMinutes, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
+      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptDocument: parsed.data.promptDocument, durationMinutes: parsed.data.durationMinutes, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
       if (!quiz) return null;
       await tx.delete(questions).where(eq(questions.quizId, quiz.id));
       await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));

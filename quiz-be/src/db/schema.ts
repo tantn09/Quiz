@@ -43,8 +43,7 @@ export const quizzes = pgTable("quizzes", {
   teacherId: uuid("teacher_id").notNull().references(() => users.id),
   title: varchar("title", { length: 200 }).notNull(),
   description: text("description").notNull().default(""),
-  promptText: text("prompt_text").notNull().default(""),
-  promptImages: jsonb("prompt_images").$type<PromptImage[]>().notNull().default([]),
+  promptDocument: jsonb("prompt_document").$type<PromptDocument>().notNull().default({ type: "doc", content: [] }),
   status: varchar("status", { length: 16 }).notNull().default("active"),
   durationMinutes: integer("duration_minutes").notNull(),
   subject: varchar("subject", { length: 120 }),
@@ -80,10 +79,11 @@ export const submissions = pgTable("submissions", {
   score: integer("score"),
   gradingStatus: varchar("grading_status", { length: 16 }).notNull().default("pending"),
   questionSnapshot: jsonb("question_snapshot").$type<QuestionSnapshot[]>().notNull(),
-  promptSnapshot: jsonb("prompt_snapshot").$type<{ text: string; images: PromptImage[] }>(),
+  promptSnapshot: jsonb("prompt_snapshot").$type<PromptDocument>(),
 }, (table) => [uniqueIndex("submission_quiz_student_identity").on(table.quizId, table.studentNameKey, table.studentClassKey)]);
 
 export type PromptImage = { id: string; alt: string };
+export type PromptDocument = { type: "doc"; content: unknown[] };
 
 export const quizAssets = pgTable("quiz_assets", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -91,6 +91,7 @@ export const quizAssets = pgTable("quiz_assets", {
   mimeType: varchar("mime_type", { length: 20 }).notNull(),
   size: integer("size").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  draftReservedUntil: timestamp("draft_reserved_until", { withTimezone: true }),
 });
 
 export type QuestionSnapshot = {

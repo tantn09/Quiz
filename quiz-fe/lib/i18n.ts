@@ -3,6 +3,13 @@
 import { useCallback, useEffect, useState } from "react";
 
 const english: Record<string, string> = {
+  "Thông tin học sinh": "Student information",
+  "Nhập tên và lớp để bắt đầu làm bài.": "Enter your name and class to begin.",
+  "Đã trả lời": "Answered",
+  "Xác nhận nộp bài": "Confirm submission",
+  "câu chưa trả lời": "unanswered questions",
+  "Bạn đã trả lời tất cả câu hỏi.": "You have answered every question.",
+  "Tiếp tục làm bài": "Continue working",
   "Kéo để đổi thứ tự": "Drag to reorder",
   "Tay nắm sắp xếp câu hỏi": "Question reorder handle",
   "Mục lục tạo quiz": "Quiz editor sections",
