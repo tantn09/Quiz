@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { useLocale, useTranslation } from "@/lib/i18n";
 import { PageHeader } from "@/components/ui/page-header";
@@ -22,6 +22,7 @@ export default function ResultsPage() {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [scores, setScores] = useState<Record<string, number>>({});
   const [notice, setNotice] = useState("");
+  const initialGroupLoaded = useRef(false);
   const t = useTranslation();
   const language = useLocale();
 
@@ -31,7 +32,16 @@ export default function ResultsPage() {
       fetch("/api/teacher/results", { cache: "no-store" }),
     ]);
     if (!summaryResponse.ok || !resultsResponse.ok) { setNotice("Không tải được kết quả."); return; }
-    setGroups((await summaryResponse.json()).groups);
+    const summary = await summaryResponse.json();
+    setGroups(summary.groups);
+    if (!initialGroupLoaded.current) {
+      initialGroupLoaded.current = true;
+      const params = new URLSearchParams(window.location.search);
+      const quizId = params.get("quizId");
+      const className = params.get("className");
+      const target = summary.groups.find((group: { quizId: string; className: string }) => group.quizId === quizId && (!className || group.className === className));
+      if (target) setSelected({ quizId: target.quizId, className: target.className });
+    }
     setRows((await resultsResponse.json()).results);
   }, []);
 
