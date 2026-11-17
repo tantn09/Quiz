@@ -68,7 +68,7 @@ export function DashboardNav({ admin = false }: DashboardNavProps) {
       aria-label={t("Điều hướng chính")}
       aria-hidden={isMobile && !open}
       inert={isMobile && !open}
-      className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-surface px-4 py-5 shadow-xl transition-transform duration-200 ease-out sm:z-30 sm:w-64 sm:translate-x-0 sm:shadow-none ${open ? "translate-x-0" : "-translate-x-full"}`}
+      className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-surface px-4 py-5 shadow-xl backdrop-blur-xl transition-transform duration-200 ease-out sm:z-30 sm:w-64 sm:translate-x-0 sm:shadow-none ${open ? "translate-x-0" : "-translate-x-full"}`}
     >
       <div className="flex items-center justify-between px-2">
         <Link href={admin ? "/admin" : "/teacher"} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">

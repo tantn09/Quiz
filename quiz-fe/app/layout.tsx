@@ -11,5 +11,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="vi" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: 'try{var theme=localStorage.getItem("quiz-theme");if(theme==="dark"||theme==="light")document.documentElement.dataset.theme=theme}catch(e){}' }} /></head><body className={beVietnamPro.variable}><ThemeBootstrap />{children}</body></html>;
+  return <html lang="vi" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: 'try{var theme=localStorage.getItem("quiz-theme");document.documentElement.dataset.theme=theme==="dark"||theme==="light"?theme:window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){}' }} /></head><body className={beVietnamPro.variable}><ThemeBootstrap />{children}</body></html>;
 }

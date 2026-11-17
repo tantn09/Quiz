@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 
 const english: Record<string, string> = {
+  "Kéo để đổi thứ tự": "Drag to reorder",
+  "Tay nắm sắp xếp câu hỏi": "Question reorder handle",
   "Mục lục tạo quiz": "Quiz editor sections",
   "Chọn mục": "Jump to section",
   "Nhân bản": "Duplicate",
