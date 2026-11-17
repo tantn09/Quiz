@@ -33,6 +33,7 @@ export default function StudentQuizPage() {
   const [done, setDone] = useState(false);
   const [pending, setPending] = useState(false);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [questionIndex, setQuestionIndex] = useState(0);
 
   const storageKey = useMemo(() => `quiz-attempt:${token}`, [token]);
 
@@ -174,15 +175,20 @@ export default function StudentQuizPage() {
   const hasPrompt = Boolean(attempt && (quiz?.promptDocument?.content?.length));
   const answered = questions.filter((question) => Boolean(answers[question.id]?.trim())).length;
   const remaining = questions.length - answered;
+  const currentQuestion = questions[Math.min(questionIndex, Math.max(questions.length - 1, 0))];
+  function moveToQuestion(index: number) {
+    setQuestionIndex(index);
+    requestAnimationFrame(() => document.getElementById("current-question")?.focus());
+  }
   return (
     <main className={`quiz-student mx-auto px-4 py-8 sm:px-6 sm:py-12 ${hasPrompt ? "max-w-[1320px]" : "max-w-3xl"} ${!attempt ? "flex min-h-dvh flex-col justify-center" : ""}`}>
-      {attempt && !done && <div className="quiz-student-status sticky top-3 z-10 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 shadow-sm"><span className="text-sm font-semibold text-content-muted">{t("Đã trả lời")} <strong className="text-brand">{answered}/{questions.length}</strong></span><span className={`rounded-full px-3 py-1 font-bold ${seconds <= 300 ? "ds-warning" : "bg-surface-accent text-brand"}`} aria-live={seconds <= 300 ? "polite" : "off"}>{t("Còn")} {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span></div>}
+      {attempt && !done && <div className="quiz-student-status sticky top-3 z-10 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 shadow-sm"><span className="text-sm font-semibold text-content-muted">{t("Đã trả lời")} <strong className="ml-1 rounded-full bg-surface-accent px-2.5 py-1 text-brand">{answered}/{questions.length}</strong></span><span className={`rounded-full px-3 py-1 font-bold ${seconds <= 300 ? "ds-warning" : "bg-surface-accent text-brand"}`} aria-live={seconds <= 300 ? "polite" : "off"}>{t("Còn")} {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span></div>}
       <div className={hasPrompt ? "grid gap-5 lg:grid-cols-2 lg:items-start" : ""}>
       {hasPrompt && <><details className="quiz-student-prompt rounded-2xl border border-line bg-surface p-5 lg:hidden"><summary className="cursor-pointer font-bold text-brand">{t("Đề bài")}</summary>{quiz?.promptDocument && <PromptView document={quiz.promptDocument} />}</details><Card className="hidden rounded-3xl p-6 sm:p-9 lg:sticky lg:top-24 lg:block lg:max-h-[calc(100dvh-7rem)] lg:overflow-y-auto"><h2 className="text-xl font-bold">{t("Đề bài")}</h2>{quiz?.promptDocument && <PromptView document={quiz.promptDocument} />}</Card></>}
-      <Card className="rounded-3xl p-5 sm:p-8">
+      <Card className="quiz-student-main rounded-3xl p-5 sm:p-8">
         <p className="text-sm font-semibold text-brand">{t("BÀI QUIZ")}</p>
         <h1 className="mt-2 text-3xl font-bold">{quiz?.title ?? t("Không mở được quiz")}</h1>
-        {quiz?.subject && <p className="mt-2 text-sm font-semibold text-brand">{t("Môn học")}: {quiz.subject}</p>}{quiz?.gradeLevel && <p className="mt-1 text-sm font-semibold text-brand">{t("Khối lớp")}: {quiz.gradeLevel}</p>}
+        {(quiz?.subject || quiz?.gradeLevel) && <div className="mt-4 flex flex-wrap gap-2">{quiz?.subject && <span className="quiz-student-chip">{t("Môn học")}: {quiz.subject}</span>}{quiz?.gradeLevel && <span className="quiz-student-chip">{t("Khối lớp")}: {quiz.gradeLevel}</span>}</div>}
         {quiz?.description && <p className="mt-3 whitespace-pre-wrap text-content-muted">{quiz.description}</p>}
         {attempt && error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
         {!attempt && quiz && <form onSubmit={start} className="quiz-student-entry mt-7 rounded-2xl border border-line bg-surface-subtle p-5 sm:p-7">
@@ -198,13 +204,14 @@ export default function StudentQuizPage() {
         {!attempt && !quiz && error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
         {attempt && done && <p className={`mt-7 rounded-2xl p-5 font-semibold ${pending ? "ds-warning" : "ds-success"}`}>{pending ? t("Bài làm đã được chốt trên thiết bị và sẽ gửi khi có kết nối mạng.") : t("Bài làm đã được chốt. Cảm ơn bạn!")}</p>}
         {attempt && !done && <form onSubmit={(event) => { event.preventDefault(); setConfirmSubmit(true); }} className="mt-8 space-y-5">
-          <div className="rounded-xl bg-surface-accent px-4 py-3 text-sm font-semibold text-brand">{t("Câu hỏi")} · {answered}/{questions.length} {t("Đã trả lời").toLowerCase()}</div>
-          {questions.map((question, index) => <fieldset key={question.id} className="quiz-student-question rounded-2xl border border-line bg-surface p-4 sm:p-5">
-            <legend className="px-2 font-semibold">{t("Câu")} {index + 1} <span className="font-normal text-content-muted">({question.points} {t("điểm")})</span></legend>
-            <p className="whitespace-pre-wrap leading-7">{question.prompt}</p>
-            {question.type === "choice" ? <div className="mt-4 space-y-2">{question.options.map((option, optionIndex) => <label key={optionIndex} className={`quiz-student-option flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${answers[question.id] === String(optionIndex) ? "border-brand bg-surface-accent" : "border-line bg-surface hover:bg-surface-subtle"}`}><input type="radio" name={question.id} checked={answers[question.id] === String(optionIndex)} onChange={() => setAnswer(question.id, String(optionIndex))} className="mt-1" /><span>{option}</span></label>)}</div> : <Textarea value={answers[question.id] ?? ""} onChange={(event) => setAnswer(question.id, event.target.value)} rows={5} className="mt-4" placeholder={t("Nhập câu trả lời của bạn")} />}
-          </fieldset>)}
-          <Button className="w-full">{t("Nộp bài")}</Button>
+          <div className="text-sm font-bold uppercase tracking-wide text-brand">{t("Câu")} {questionIndex + 1} / {questions.length}</div>
+          <div className="h-2 overflow-hidden rounded-full bg-surface-accent" role="progressbar" aria-label={t("Tiến độ câu hỏi")} aria-valuemin={0} aria-valuemax={questions.length} aria-valuenow={questionIndex + 1}><div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${((questionIndex + 1) / Math.max(questions.length, 1)) * 100}%` }} /></div>
+          {currentQuestion && <fieldset key={currentQuestion.id} id="current-question" tabIndex={-1} className="quiz-student-question rounded-2xl border border-line bg-surface p-4 outline-none sm:p-5">
+            <legend className="quiz-student-legend px-2 font-semibold">{t("Câu hỏi")} <span className="font-normal text-content-muted">· {currentQuestion.points} {t("điểm")}</span></legend>
+            <p className="whitespace-pre-wrap leading-7">{currentQuestion.prompt}</p>
+            {currentQuestion.type === "choice" ? <div className="mt-4 space-y-2">{currentQuestion.options.map((option, optionIndex) => <label key={optionIndex} className={`quiz-student-option flex min-h-12 cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors ${answers[currentQuestion.id] === String(optionIndex) ? "border-brand bg-surface-accent" : "border-line bg-surface hover:bg-surface-subtle"}`}><input type="radio" name={currentQuestion.id} checked={answers[currentQuestion.id] === String(optionIndex)} onChange={() => setAnswer(currentQuestion.id, String(optionIndex))} className="mt-1" /><span>{option}</span></label>)}</div> : <Textarea value={answers[currentQuestion.id] ?? ""} onChange={(event) => setAnswer(currentQuestion.id, event.target.value)} rows={5} className="mt-4" placeholder={t("Nhập câu trả lời của bạn")} />}
+          </fieldset>}
+          <div className="flex flex-wrap justify-between gap-3"><Button type="button" variant="outline" disabled={questionIndex === 0} onClick={() => moveToQuestion(questionIndex - 1)}>{t("Câu trước")}</Button>{questionIndex < questions.length - 1 ? <Button type="button" onClick={() => moveToQuestion(questionIndex + 1)}>{t("Câu tiếp theo")}</Button> : <Button type="submit">{t("Nộp bài")}</Button>}</div>
         </form>}
       </Card></div>
       <Modal opened={confirmSubmit && !done} onClose={() => setConfirmSubmit(false)} title={t("Xác nhận nộp bài")} centered><p className="text-content-muted">{remaining > 0 ? `${t("Còn")} ${remaining} ${t("câu chưa trả lời")}.` : t("Bạn đã trả lời tất cả câu hỏi.")}</p><div className="mt-6 flex flex-wrap justify-end gap-3"><Button type="button" variant="outline" onClick={() => setConfirmSubmit(false)}>{t("Tiếp tục làm bài")}</Button><Button type="button" onClick={() => { setConfirmSubmit(false); void submit(answers); }}>{t("Nộp bài")}</Button></div></Modal>

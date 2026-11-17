@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 const english: Record<string, string> = {
+  "Tiến độ câu hỏi": "Question progress",
+  "Câu trước": "Previous question",
+  "Câu tiếp theo": "Next question",
   "Thông tin học sinh": "Student information",
   "Nhập tên và lớp để bắt đầu làm bài.": "Enter your name and class to begin.",
   "Đã trả lời": "Answered",
