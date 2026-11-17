@@ -12,7 +12,7 @@ import { Modal } from "@mantine/core";
 
 type QuizQuestion = { id: string; position: number; type: "choice" | "essay"; prompt: string; options: string[]; points: number };
 type QuizInfo = { title: string; description: string; promptDocument: JSONContent; subject?: string | null; gradeLevel?: string | null; assignedClass?: string | null };
-type Attempt = { id: string; dueAt: string; submitted: boolean };
+type Attempt = { id: string; dueAt: string; submitted: boolean; variantCode?: number };
 type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean };
 
 export default function StudentQuizPage() {
@@ -188,6 +188,7 @@ export default function StudentQuizPage() {
       <Card className="quiz-student-main rounded-3xl p-5 sm:p-8">
         <p className="text-sm font-semibold text-brand">{t("BÀI QUIZ")}</p>
         <h1 className="mt-2 text-3xl font-bold">{quiz?.title ?? t("Không mở được quiz")}</h1>
+        {attempt?.variantCode && <p className="mt-2 font-semibold text-brand">Mã đề {attempt.variantCode}</p>}
         {(quiz?.subject || quiz?.gradeLevel) && <div className="mt-4 flex flex-wrap gap-2">{quiz?.subject && <span className="quiz-student-chip">{t("Môn học")}: {quiz.subject}</span>}{quiz?.gradeLevel && <span className="quiz-student-chip">{t("Khối lớp")}: {quiz.gradeLevel}</span>}</div>}
         {quiz?.description && <p className="mt-3 whitespace-pre-wrap text-content-muted">{quiz.description}</p>}
         {attempt && error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}

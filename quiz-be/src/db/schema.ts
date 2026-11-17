@@ -58,6 +58,7 @@ export const quizzes = pgTable("quizzes", {
 export const questions = pgTable("questions", {
   id: uuid("id").defaultRandom().primaryKey(),
   quizId: uuid("quiz_id").notNull().references(() => quizzes.id, { onDelete: "cascade" }),
+  variantId: uuid("variant_id").references(() => quizVariants.id),
   position: integer("position").notNull(),
   type: varchar("type", { length: 16 }).notNull(),
   prompt: text("prompt").notNull(),
@@ -66,9 +67,19 @@ export const questions = pgTable("questions", {
   points: integer("points").notNull().default(1),
 });
 
+export const quizVariants = pgTable("quiz_variants", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  quizId: uuid("quiz_id").notNull().references(() => quizzes.id, { onDelete: "cascade" }),
+  code: integer("code").notNull(),
+  active: boolean("active").notNull().default(true),
+  deleted: boolean("deleted").notNull().default(false),
+  assignedCount: integer("assigned_count").notNull().default(0),
+}, (table) => [uniqueIndex("quiz_variant_code").on(table.quizId, table.code)]);
+
 export const submissions = pgTable("submissions", {
   id: uuid("id").defaultRandom().primaryKey(),
   quizId: uuid("quiz_id").notNull().references(() => quizzes.id),
+  variantId: uuid("variant_id").references(() => quizVariants.id),
   studentName: varchar("student_name", { length: 160 }).notNull(),
   studentClass: varchar("student_class", { length: 80 }).notNull(),
   studentNameKey: varchar("student_name_key", { length: 160 }).notNull(),

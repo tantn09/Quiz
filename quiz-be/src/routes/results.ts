@@ -4,7 +4,7 @@ import { and, desc, eq, ilike, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
-import { answers, quizzes, submissions } from "../db/schema.js";
+import { answers, quizzes, quizVariants, submissions } from "../db/schema.js";
 
 function ownerFilter(user: { id: string; role: string }) {
   return user.role === "admin" ? undefined : eq(quizzes.teacherId, user.id);
@@ -39,11 +39,11 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
     if (query.data.className) filters.push(eq(submissions.studentClass, query.data.className));
     if (query.data.gradingStatus) filters.push(eq(submissions.gradingStatus, query.data.gradingStatus));
     if (query.data.search) filters.push(or(ilike(submissions.studentName, `%${query.data.search}%`), ilike(submissions.studentClass, `%${query.data.search}%`), ilike(quizzes.title, `%${query.data.search}%`))!);
-    const rows = await db.select({ id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title })
-      .from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(filters.length ? and(...filters) : undefined).orderBy(desc(submissions.submittedAt));
+    const rows = await db.select({ id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title, variantCode: quizVariants.code, questionSnapshot: submissions.questionSnapshot })
+      .from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).innerJoin(quizVariants, eq(submissions.variantId, quizVariants.id)).where(filters.length ? and(...filters) : undefined).orderBy(desc(submissions.submittedAt));
     const quizList = await db.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(owner);
     const classes = await db.selectDistinct({ quizId: quizzes.id, name: submissions.studentClass }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(owner);
-    return { results: rows, quizzes: quizList.map((quiz) => ({ ...quiz, classes: classes.filter((item) => item.quizId === quiz.id).map((item) => item.name) })) };
+    return { results: rows.map(({ questionSnapshot, ...row }) => ({ ...row, maxScore: questionSnapshot.reduce((sum, question) => sum + question.points, 0) })), quizzes: quizList.map((quiz) => ({ ...quiz, classes: classes.filter((item) => item.quizId === quiz.id).map((item) => item.name) })) };
   });
 
   app.get("/teacher/results/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
@@ -53,7 +53,8 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
       .innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(eq(submissions.id, params.data.id)).limit(1);
     if (!row || (request.authUser!.role !== "admin" && row.teacherId !== request.authUser!.id)) return reply.code(404).send({ error: "not_found" });
     const responseAnswers = await db.select().from(answers).where(eq(answers.submissionId, row.submission.id));
-    return { submission: { ...row.submission, quizTitle: row.quizTitle }, answers: responseAnswers };
+    const [variant] = await db.select({ code: quizVariants.code }).from(quizVariants).where(eq(quizVariants.id, row.submission.variantId!)).limit(1);
+    return { submission: { ...row.submission, quizTitle: row.quizTitle, variantCode: variant?.code, maxScore: row.submission.questionSnapshot.reduce((sum, question) => sum + question.points, 0) }, answers: responseAnswers };
   });
 
   app.patch("/teacher/results/:id/grade", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
@@ -113,7 +114,7 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
     if (!params.success || !query.success) return reply.code(400).send({ error: "invalid_request" });
     const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ownerFilter(request.authUser!))).limit(1);
     if (!quiz) return reply.code(404).send({ error: "not_found" });
-    const rows = await db.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), isNotNull(submissions.submittedAt), query.data.className ? eq(submissions.studentClass, query.data.className) : undefined)).orderBy(desc(submissions.submittedAt));
+    const rows = await db.select({ submission: submissions, variantCode: quizVariants.code }).from(submissions).innerJoin(quizVariants, eq(submissions.variantId, quizVariants.id)).where(and(eq(submissions.quizId, quiz.id), isNotNull(submissions.submittedAt), query.data.className ? eq(submissions.studentClass, query.data.className) : undefined)).orderBy(desc(submissions.submittedAt));
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("Kết quả");
     const english = request.authUser!.language === "en";
@@ -123,14 +124,18 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
       { header: english ? "Submitted at" : "Thời điểm nộp", key: "submittedAt", width: 24 },
       { header: english ? "Score" : "Điểm", key: "score", width: 12 },
       { header: english ? "Grading status" : "Trạng thái chấm", key: "gradingStatus", width: 20 },
+      { header: english ? "Variant" : "Mã đề", key: "variantCode", width: 12 },
+      { header: english ? "Maximum score" : "Tổng điểm", key: "maxScore", width: 14 },
     ];
     sheet.getRow(1).font = { bold: true };
     rows.forEach((row) => sheet.addRow({
-      studentName: row.studentName,
-      studentClass: row.studentClass,
-      submittedAt: row.submittedAt?.toISOString() ?? "",
-      score: row.score ?? "",
-      gradingStatus: english ? ({ pending: "Pending", needs_review: "Needs grading", graded: "Graded" }[row.gradingStatus] ?? row.gradingStatus) : row.gradingStatus,
+      studentName: row.submission.studentName,
+      studentClass: row.submission.studentClass,
+      submittedAt: row.submission.submittedAt?.toISOString() ?? "",
+      score: row.submission.score ?? "",
+      gradingStatus: english ? ({ pending: "Pending", needs_review: "Needs grading", graded: "Graded" }[row.submission.gradingStatus] ?? row.submission.gradingStatus) : row.submission.gradingStatus,
+      variantCode: row.variantCode,
+      maxScore: row.submission.questionSnapshot.reduce((sum, question) => sum + question.points, 0),
     }));
     const file = Buffer.from(await workbook.xlsx.writeBuffer());
     reply.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");

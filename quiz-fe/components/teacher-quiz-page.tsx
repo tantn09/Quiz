@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
 import { PromptEditor, emptyPrompt, promptImages, type PromptDocument } from "@/components/prompt-editor";
 import { PromptView } from "@/components/prompt-view";
+import { QuizVariants } from "@/components/quiz-variants";
 import { DragDropProvider } from "@dnd-kit/react";
 import { isSortable, useSortable } from "@dnd-kit/react/sortable";
 import { ArrowDown, ArrowUp, CalendarDays, ChevronDown, ChevronUp, Clock3, Copy, EllipsisVertical, GripVertical, Trash2 } from "lucide-react";
@@ -149,6 +150,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   const [timeBusy, setTimeBusy] = useState(false);
   const [detailQuiz, setDetailQuiz] = useState<QuizRow | null>(null);
   const [detail, setDetail] = useState<QuizDetail | null>(null);
+  const [detailTab, setDetailTab] = useState<"overview" | "variants">("overview");
   const [detailError, setDetailError] = useState("");
   const [draftOwner, setDraftOwner] = useState<string | null>(null);
   const [draftCandidate, setDraftCandidate] = useState<SavedDraft | null>(null);
@@ -322,6 +324,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
 
   async function openDetail(quiz: QuizRow) {
     if (mode === "list") { router.push(`/teacher/quizzes/${quiz.id}`); return; }
+    setDetailTab("overview");
     setDetailQuiz(quiz); setDetail(null); setDetailError("");
     try {
       const response = await fetch(`/api/teacher/quizzes/${quiz.id}`, { cache: "no-store" });
@@ -414,6 +417,8 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       {!detail && !detailError && <p role="status" className="py-8 text-center text-content-muted">{t("Đang tải chi tiết…")}</p>}
       {detailError && <div role="alert" className="rounded-xl ds-error p-4 text-sm">{detailError}<Button type="button" variant="outline" className="mt-3" onClick={() => { if (params.id) window.location.reload(); else if (detailQuiz) void openDetail(detailQuiz); }}>{t("Thử lại")}</Button></div>}
       {detail && <div className="space-y-6">
+        <div role="tablist" aria-label="Nội dung chi tiết quiz" className="flex gap-2 border-b border-line pb-3"><button type="button" role="tab" aria-selected={detailTab === "overview"} onClick={() => setDetailTab("overview")} className={`rounded-xl px-4 py-2 text-sm font-semibold ${detailTab === "overview" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Thông tin quiz</button><button type="button" role="tab" aria-selected={detailTab === "variants"} onClick={() => setDetailTab("variants")} className={`rounded-xl px-4 py-2 text-sm font-semibold ${detailTab === "variants" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Quản lý mã đề</button></div>
+        {detailTab === "overview" && <div role="tabpanel" className="space-y-6">
         <div><h3 className="text-xl font-bold">{detail.quiz.title}</h3><p className="mt-2 whitespace-pre-wrap text-sm text-content-muted">{detail.quiz.description || t("Chưa có mô tả.")}</p></div>
         {detail.quiz.subject && <p className="text-sm"><strong>{t("Môn học")}:</strong> {detail.quiz.subject}</p>}
         {detail.quiz.assignedClass && <p className="text-sm"><strong>Lớp được giao:</strong> {detail.quiz.assignedClass}</p>}
@@ -422,6 +427,8 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
         {Boolean(detail.quiz.promptDocument?.content?.length) && <section><h4 className="font-semibold">{t("Đề bài")}</h4><PromptView document={detail.quiz.promptDocument!} /></section>}
         <section><h4 className="font-semibold">{t("Câu hỏi")} ({detail.questions.length})</h4><div className="mt-3 space-y-3">{detail.questions.map((question, index) => <div key={question.id} className="rounded-xl border border-line p-4"><p className="text-sm font-semibold text-content-muted">{t("Câu")} {index + 1} · {question.type === "choice" ? t("Trắc nghiệm") : t("Tự luận")} · {question.points} {t("điểm")}</p><p className="mt-2 whitespace-pre-wrap font-medium">{question.prompt}</p>{question.type === "choice" && <ol className="mt-3 space-y-1 pl-5 text-sm">{question.options.map((option, optionIndex) => <li key={optionIndex} className={`list-decimal ${optionIndex === question.correctOption ? "font-semibold text-emerald-700" : ""}`}>{option}{optionIndex === question.correctOption ? ` · ${t("Đáp án đúng")}` : ""}</li>)}</ol>}</div>)}</div></section>
         <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" onClick={() => void copyLink(detail.quiz)}>{t("Sao chép link")}</Button><Button type="button" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>{t("Sửa quiz")}</Button></div>
+        </div>}
+        {detailTab === "variants" && <div role="tabpanel"><QuizVariants quizId={detail.quiz.id} /></div>}
       </div>}
     </QuizSurface>}
     {timeQuiz && <Modal title={t("Cộng thời gian làm")} closeLabel={t("Đóng")} onClose={() => { if (!timeBusy) setTimeQuiz(null); }}>

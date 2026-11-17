@@ -5,7 +5,7 @@ import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
 import { promptDocumentSchema, promptImageIds } from "../prompt-document.js";
-import { questions, quizzes, submissions, quizAssets, subjects, gradeLevels } from "../db/schema.js";
+import { questions, quizzes, submissions, quizAssets, subjects, gradeLevels, quizVariants } from "../db/schema.js";
 
 const questionInput = z.object({
   type: z.enum(["choice", "essay"]),
@@ -82,7 +82,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
         linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null,
         linkToken,
       }).returning();
-      await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));
+      const [variant] = await tx.insert(quizVariants).values({ quizId: quiz.id, code: 101 }).returning();
+      await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, variantId: variant.id, position })));
       return [quiz];
     });
     return reply.code(201).send({ quiz: created, link: `/q/${linkToken}` });
@@ -93,8 +94,9 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
     const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
     if (!quiz) return reply.code(404).send({ error: "not_found" });
+    const variants = await db.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.deleted, false))).orderBy(quizVariants.code);
     const items = await db.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
-    return { quiz, questions: items };
+    return { quiz, variants: variants.map((variant) => ({ ...variant, questions: items.filter((item) => item.variantId === variant.id) })), questions: items.filter((item) => item.variantId === variants[0]?.id) };
   });
 
   app.put("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
@@ -111,8 +113,9 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       if (!labels) return null;
       const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptDocument: parsed.data.promptDocument, durationMinutes: parsed.data.durationMinutes, assignedClass: existing.assignedClass, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
       if (!quiz) return null;
-      await tx.delete(questions).where(eq(questions.quizId, quiz.id));
-      await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));
+      const [primary] = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.deleted, false))).orderBy(quizVariants.code).limit(1);
+      await tx.delete(questions).where(eq(questions.variantId, primary.id));
+      await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, variantId: primary.id, position })));
       return quiz;
     });
     if (!updated) return reply.code(404).send({ error: "not_found" });
@@ -127,12 +130,87 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       const [source] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
       if (!source) return null;
       const sourceQuestions = await tx.select().from(questions).where(eq(questions.quizId, source.id)).orderBy(questions.position);
+      const sourceVariants = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, source.id), eq(quizVariants.deleted, false)));
       const [quiz] = await tx.insert(quizzes).values({ teacherId: source.teacherId, title: source.title, description: source.description, promptDocument: source.promptDocument, status: "inactive", durationMinutes: source.durationMinutes, subject: source.subject, gradeLevel: source.gradeLevel, assignedClass: body.data.assignedClass, linkExpiresAt: source.linkExpiresAt && source.linkExpiresAt > new Date() ? source.linkExpiresAt : null, linkToken: randomBytes(24).toString("base64url") }).returning();
-      if (sourceQuestions.length) await tx.insert(questions).values(sourceQuestions.map(({ position, type, prompt, options, correctOption, points }) => ({ quizId: quiz.id, position, type, prompt, options, correctOption, points })));
+      for (const sourceVariant of sourceVariants) {
+        const [variant] = await tx.insert(quizVariants).values({ quizId: quiz.id, code: sourceVariant.code, active: sourceVariant.active }).returning();
+        const sourceItems = sourceQuestions.filter((item) => item.variantId === sourceVariant.id);
+        if (sourceItems.length) await tx.insert(questions).values(sourceItems.map(({ position, type, prompt, options, correctOption, points }) => ({ quizId: quiz.id, variantId: variant.id, position, type, prompt, options, correctOption, points })));
+      }
       return quiz;
     });
     if (!cloned) return reply.code(404).send({ error: "not_found" });
     return reply.code(201).send({ quiz: cloned, link: `/q/${cloned.linkToken}` });
+  });
+
+  app.post("/teacher/quizzes/:id/variants", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const body = z.discriminatedUnion("mode", [z.object({ mode: z.literal("manual"), questions: z.array(questionInput).min(1).max(200) }), z.object({ mode: z.literal("shuffle"), sourceVariantId: z.string().uuid() })]).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    const result = await db.transaction(async (tx) => {
+      const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).for("update").limit(1);
+      if (!quiz) return null;
+      const existing = await tx.select().from(quizVariants).where(eq(quizVariants.quizId, quiz.id)).orderBy(desc(quizVariants.code));
+      let items: { type: string; prompt: string; options: string[]; correctOption: number | null; points: number }[];
+      if (body.data.mode === "manual") items = body.data.questions;
+      else {
+        const sourceVariantId = body.data.sourceVariantId;
+        if (!existing.some((variant) => variant.id === sourceVariantId && !variant.deleted)) return null;
+        const source = await tx.select().from(questions).where(eq(questions.variantId, sourceVariantId));
+        const shuffle = <T,>(values: T[]) => { const copy = [...values]; for (let i = copy.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]]; } return copy; };
+        items = source.map((item) => {
+          const order = shuffle(item.options.map((_, index) => index));
+          return { type: item.type, prompt: item.prompt, options: order.map((index) => item.options[index]), correctOption: item.correctOption === null ? null : order.indexOf(item.correctOption), points: item.points };
+        });
+        items = shuffle(items);
+      }
+      const [variant] = await tx.insert(quizVariants).values({ quizId: quiz.id, code: (existing[0]?.code ?? 100) + 1 }).returning();
+      await tx.insert(questions).values(items.map((item, position) => ({ ...item, quizId: quiz.id, variantId: variant.id, position })));
+      return variant;
+    });
+    if (!result) return reply.code(404).send({ error: "not_found" });
+    return reply.code(201).send({ variant: result });
+  });
+
+  app.put("/teacher/quizzes/:id/variants/:variantId", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid(), variantId: z.string().uuid() }).safeParse(request.params);
+    const body = z.object({ questions: z.array(questionInput).min(1).max(200), active: z.boolean() }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    const result = await db.transaction(async (tx) => {
+      const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).for("update").limit(1);
+      if (!quiz) return "missing";
+      const variants = await tx.select().from(quizVariants).where(eq(quizVariants.quizId, quiz.id));
+      if (!variants.some((variant) => variant.id === params.data.variantId && !variant.deleted)) return "missing";
+      if (quiz.status === "active" && !body.data.active && !variants.some((variant) => variant.id !== params.data.variantId && variant.active && !variant.deleted)) return "last_active";
+      await tx.update(quizVariants).set({ active: body.data.active }).where(eq(quizVariants.id, params.data.variantId));
+      await tx.delete(questions).where(eq(questions.variantId, params.data.variantId));
+      await tx.insert(questions).values(body.data.questions.map((item, position) => ({ ...item, quizId: quiz.id, variantId: params.data.variantId, position })));
+      return "saved";
+    });
+    if (result === "missing") return reply.code(404).send({ error: "not_found" });
+    if (result === "last_active") return reply.code(409).send({ error: "last_active_variant" });
+    return { saved: true };
+  });
+
+  app.delete("/teacher/quizzes/:id/variants/:variantId", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid(), variantId: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const outcome = await db.transaction(async (tx) => {
+      const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).for("update").limit(1);
+      if (!quiz) return "missing";
+      const variants = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.deleted, false)));
+      const variant = variants.find((item) => item.id === params.data.variantId);
+      if (!variant) return "missing";
+      if (variants.length === 1) return "last_variant";
+      if (quiz.status === "active" && variant.active && !variants.some((item) => item.id !== variant.id && item.active)) return "last_active";
+      const [used] = await tx.select({ id: submissions.id }).from(submissions).where(eq(submissions.variantId, variant.id)).limit(1);
+      if (used) await tx.update(quizVariants).set({ deleted: true, active: false }).where(eq(quizVariants.id, variant.id));
+      else { await tx.delete(questions).where(eq(questions.variantId, variant.id)); await tx.delete(quizVariants).where(eq(quizVariants.id, variant.id)); }
+      return "deleted";
+    });
+    if (outcome === "missing") return reply.code(404).send({ error: "not_found" });
+    if (outcome !== "deleted") return reply.code(409).send({ error: outcome });
+    return reply.code(204).send();
   });
 
   app.post("/teacher/quizzes/:id/stop", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
@@ -164,6 +242,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const [existing] = await db.select().from(quizzes).where(and(...filters)).limit(1);
     if (!existing || (!body.data.linkExpiresAt && existing.linkExpiresAt && existing.linkExpiresAt <= new Date())) return reply.code(400).send({ error: "invalid_request" });
+    const [enabledVariant] = await db.select({ id: quizVariants.id }).from(quizVariants).where(and(eq(quizVariants.quizId, existing.id), eq(quizVariants.active, true), eq(quizVariants.deleted, false))).limit(1);
+    if (!enabledVariant) return reply.code(409).send({ error: "no_active_variant" });
     const [updated] = await db.update(quizzes).set({ status: "active", ...(body.data.linkExpiresAt ? { linkExpiresAt: new Date(body.data.linkExpiresAt) } : {}), updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id, status: quizzes.status, linkExpiresAt: quizzes.linkExpiresAt });
     if (!updated) return reply.code(404).send({ error: "not_found" });
     return { quiz: updated };

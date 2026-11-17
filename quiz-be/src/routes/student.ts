@@ -1,9 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { answers, questions, quizzes, submissions, type QuestionSnapshot } from "../db/schema.js";
+import { answers, questions, quizzes, quizVariants, submissions, type QuestionSnapshot } from "../db/schema.js";
 
 const identityBody = z.object({ name: z.string().trim().min(1).max(160), className: z.string().trim().min(1).max(80).optional() });
 const answersBody = z.object({ answers: z.record(z.string().uuid(), z.union([z.string().max(10000), z.number().int().min(0), z.null()])) });
@@ -32,8 +32,7 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     if (!params.success) return reply.code(404).send({ error: "not_found" });
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).limit(1);
     if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return reply.code(410).send({ error: "link_expired" });
-    const items = await db.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
-    return { quiz: { title: quiz.title, description: quiz.description, promptDocument: quiz.promptDocument, subject: quiz.subject, gradeLevel: quiz.gradeLevel, assignedClass: quiz.assignedClass }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
+    return { quiz: { title: quiz.title, description: quiz.description, promptDocument: quiz.promptDocument, subject: quiz.subject, gradeLevel: quiz.gradeLevel, assignedClass: quiz.assignedClass }, questions: [] };
   });
 
   app.post("/public/quizzes/:token/start", async (request, reply) => {
@@ -50,7 +49,9 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       const classKey = identityKey(studentClass);
       const [existing] = await tx.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))).limit(1);
       if (existing) return { kind: "duplicate" as const };
-      const items = await tx.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
+      const [variant] = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.active, true), eq(quizVariants.deleted, false))).orderBy(quizVariants.assignedCount, quizVariants.code).limit(1);
+      if (!variant) return { kind: "invalid" as const };
+      const items = await tx.select().from(questions).where(eq(questions.variantId, variant.id)).orderBy(questions.position);
       const snapshot: QuestionSnapshot[] = items.map((question) => ({
         id: question.id,
         position: question.position,
@@ -62,13 +63,14 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       }));
       const startedAt = new Date();
       const dueAt = new Date(startedAt.getTime() + quiz.durationMinutes * 60_000);
-      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, studentName: body.data.name, studentClass, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
-      return { kind: "created" as const, quiz, attempt, snapshot };
+      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, variantId: variant.id, studentName: body.data.name, studentClass, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
+      await tx.update(quizVariants).set({ assignedCount: sql`${quizVariants.assignedCount} + 1` }).where(eq(quizVariants.id, variant.id));
+      return { kind: "created" as const, quiz, attempt, snapshot, code: variant.code };
     });
     if (result.kind === "expired") return reply.code(410).send({ error: "link_expired" });
     if (result.kind === "invalid") return reply.code(400).send({ error: "class_required" });
     if (result.kind === "duplicate") return reply.code(409).send({ error: "attempt_exists" });
-    return reply.code(201).send({ attempt: { id: result.attempt.id, startedAt: result.attempt.startedAt, dueAt: result.attempt.dueAt }, resumeToken, quiz: { title: result.quiz.title, prompt: result.attempt.promptSnapshot }, questions: publicQuestions(result.snapshot) });
+    return reply.code(201).send({ attempt: { id: result.attempt.id, startedAt: result.attempt.startedAt, dueAt: result.attempt.dueAt, variantCode: result.code }, resumeToken, quiz: { title: result.quiz.title, prompt: result.attempt.promptSnapshot }, questions: publicQuestions(result.snapshot) });
   });
 
   app.get("/public/attempts/:id", async (request, reply) => {
@@ -76,7 +78,8 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     if (!attempt) return;
     const [quiz] = await db.select({ title: quizzes.title, description: quizzes.description }).from(quizzes).where(eq(quizzes.id, attempt.quizId)).limit(1);
     const saved = await db.select({ questionId: answers.questionId, answer: answers.answer }).from(answers).where(eq(answers.submissionId, attempt.id));
-    return { attempt: { id: attempt.id, dueAt: attempt.dueAt, submitted: Boolean(attempt.submittedAt) }, quiz, prompt: attempt.promptSnapshot, questions: publicQuestions(attempt.questionSnapshot), answers: Object.fromEntries(saved.map((entry) => [entry.questionId, entry.answer])) };
+    const [variant] = await db.select({ code: quizVariants.code }).from(quizVariants).where(eq(quizVariants.id, attempt.variantId!)).limit(1);
+    return { attempt: { id: attempt.id, dueAt: attempt.dueAt, submitted: Boolean(attempt.submittedAt), variantCode: variant?.code }, quiz, prompt: attempt.promptSnapshot, questions: publicQuestions(attempt.questionSnapshot), answers: Object.fromEntries(saved.map((entry) => [entry.questionId, entry.answer])) };
   });
 
   app.put("/public/attempts/:id/answers", async (request, reply) => {
