@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../db/index.js";
 import { answers, questions, quizzes, quizVariants, submissions, type QuestionSnapshot } from "../db/schema.js";
 
-const identityBody = z.object({ name: z.string().trim().min(1).max(160), className: z.string().trim().min(1).max(80).optional() });
+const identityBody = z.object({ name: z.string().trim().min(1).max(160), className: z.string().trim().max(80).optional() });
 const answersBody = z.object({ answers: z.record(z.string().uuid(), z.union([z.string().max(10000), z.number().int().min(0), z.null()])) });
 const digest = (token: string) => createHash("sha256").update(token).digest("hex");
 const identityKey = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("vi");

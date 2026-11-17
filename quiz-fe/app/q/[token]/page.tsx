@@ -148,7 +148,7 @@ export default function StudentQuizPage() {
     setError("");
     try {
       const response = await fetch(`/api/public/quizzes/${token}/start`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, className }),
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(quiz?.assignedClass ? { name } : { name, className }),
       });
       if (response.status === 409) throw new Error(t("Tên và lớp này đã có lượt làm cho quiz."));
       if (!response.ok) throw new Error(t("Không thể bắt đầu quiz. Hãy kiểm tra link và kết nối mạng."));
