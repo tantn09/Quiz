@@ -1,0 +1,5 @@
+services:
+  api:
+    image: ${QUIZ_IMAGE_NAMESPACE:?Set QUIZ_IMAGE_NAMESPACE}/quiz-api:${QUIZ_IMAGE_TAG:?Set QUIZ_IMAGE_TAG}
+  web:
+    image: ${QUIZ_IMAGE_NAMESPACE:?Set QUIZ_IMAGE_NAMESPACE}/quiz-web:${QUIZ_IMAGE_TAG:?Set QUIZ_IMAGE_TAG}

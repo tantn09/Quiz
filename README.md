@@ -76,3 +76,7 @@ docker compose exec -T postgres pg_restore -U quiz -d quiz --clean --if-exists <
 ```
 
 Lưu bản sao lưu ngoài VPS và kiểm tra quy trình khôi phục định kỳ. Dữ liệu PostgreSQL nằm trong volume `quiz-postgres`. Ảnh đề bài nằm trong volume `quiz-assets`; sao lưu cả volume này để ảnh tiếp tục hiển thị sau khi khôi phục database. Khi chạy BE trực tiếp trên máy phát triển, ảnh nằm trong `quiz-be/uploads` (hoặc thư mục `ASSET_DIR` nếu có cấu hình riêng).
+
+## Triển khai trên Windows qua Cloudflare Tunnel
+
+Xem [hướng dẫn Hyper-V, Ubuntu và Cloudflare Tunnel](docs/windows-hyperv-cloudflare.md) để cài đặt, kiểm tra sau reboot, cập nhật, sao lưu và khôi phục.
