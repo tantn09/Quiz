@@ -205,7 +205,12 @@ export default function StudentQuizPage() {
         {attempt && done && <p className={`mt-7 rounded-2xl p-5 font-semibold ${pending ? "ds-warning" : "ds-success"}`}>{pending ? t("Bài làm đã được chốt trên thiết bị và sẽ gửi khi có kết nối mạng.") : t("Bài làm đã được chốt. Cảm ơn bạn!")}</p>}
         {attempt && !done && <form onSubmit={(event) => { event.preventDefault(); setConfirmSubmit(true); }} className="mt-8 space-y-5">
           <div className="text-sm font-bold uppercase tracking-wide text-brand">{t("Câu")} {questionIndex + 1} / {questions.length}</div>
-          <div className="h-2 overflow-hidden rounded-full bg-surface-accent" role="progressbar" aria-label={t("Tiến độ câu hỏi")} aria-valuemin={0} aria-valuemax={questions.length} aria-valuenow={questionIndex + 1}><div className="h-full rounded-full bg-brand transition-[width]" style={{ width: `${((questionIndex + 1) / Math.max(questions.length, 1)) * 100}%` }} /></div>
+          <nav aria-label={t("Điều hướng câu hỏi")} className="quiz-question-nav -mx-1 flex gap-1 overflow-x-auto px-1 py-1 sm:flex-wrap">
+            {questions.map((question, index) => {
+              const isAnswered = Boolean(answers[question.id]?.trim());
+              return <button key={question.id} type="button" aria-current={index === questionIndex ? "step" : undefined} aria-label={`${t("Câu")} ${index + 1}: ${isAnswered ? t("Đã trả lời") : t("Chưa trả lời")}`} title={`${t("Câu")} ${index + 1}: ${isAnswered ? t("Đã trả lời") : t("Chưa trả lời")}`} onClick={() => moveToQuestion(index)} className={`quiz-question-nav-item flex size-10 shrink-0 items-center justify-center rounded-lg border text-xs font-bold transition-colors ${isAnswered ? "border-b-4" : ""} ${index === questionIndex ? "border-brand bg-brand text-brand-foreground" : isAnswered ? "border-brand bg-surface-accent text-brand" : "border-line bg-surface text-content-muted hover:border-brand"}`}>{index + 1}</button>;
+            })}
+          </nav>
           {currentQuestion && <fieldset key={currentQuestion.id} id="current-question" tabIndex={-1} className="quiz-student-question rounded-2xl border border-line bg-surface p-4 outline-none sm:p-5">
             <legend className="quiz-student-legend px-2 font-semibold">{t("Câu hỏi")} <span className="font-normal text-content-muted">· {currentQuestion.points} {t("điểm")}</span></legend>
             <p className="whitespace-pre-wrap leading-7">{currentQuestion.prompt}</p>

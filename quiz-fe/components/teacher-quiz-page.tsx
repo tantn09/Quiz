@@ -26,7 +26,7 @@ type CatalogItem = { id: string; name: string };
 type SavedDraft = { savedAt: number; title: string; description: string; promptDocument: PromptDocument; duration: number; expiresAt: string; subject: string; gradeLevel: string; questions: QuestionDraft[] };
 const DRAFT_TTL = 30 * 24 * 60 * 60 * 1000;
 type QuizDetail = { quiz: QuizRow & { promptDocument?: PromptDocument }; questions: { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }[] };
-type QuizActionsProps = { quiz: QuizRow; t: (value: string) => string; copyLink: (quiz: QuizRow) => Promise<void>; edit: (quiz: QuizRow) => Promise<void>; openLinkExpiry: (quiz: QuizRow) => void; extendAttempts: (quiz: QuizRow) => Promise<void>; stop: (quiz: QuizRow) => Promise<void>; deleteQuiz: (quiz: QuizRow) => Promise<void> };
+type QuizActionsProps = { quiz: QuizRow; t: (value: string) => string; copyLink: (quiz: QuizRow) => Promise<void>; edit: (quiz: QuizRow) => Promise<void>; openLinkExpiry: (quiz: QuizRow) => void; extendAttempts: (quiz: QuizRow) => void; stop: (quiz: QuizRow) => Promise<void>; deleteQuiz: (quiz: QuizRow) => Promise<void> };
 const emptyQuestion = (): QuestionDraft => ({ id: crypto.randomUUID(), type: "choice", prompt: "", options: ["", ""], correctOption: -1, points: 1 });
 const localDateTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const formatTimeFirst = (value: string) => { const date = new Date(value); return `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} · ${date.toLocaleDateString("vi-VN")}`; };
@@ -138,6 +138,10 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   const [newLinkExpiry, setNewLinkExpiry] = useState("");
   const [linkError, setLinkError] = useState("");
   const [linkBusy, setLinkBusy] = useState(false);
+  const [timeQuiz, setTimeQuiz] = useState<QuizRow | null>(null);
+  const [additionalMinutes, setAdditionalMinutes] = useState("10");
+  const [timeError, setTimeError] = useState("");
+  const [timeBusy, setTimeBusy] = useState(false);
   const [detailQuiz, setDetailQuiz] = useState<QuizRow | null>(null);
   const [detail, setDetail] = useState<QuizDetail | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -357,13 +361,26 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     finally { setLinkBusy(false); }
   }
 
-  async function extendAttempts(quiz: QuizRow) {
-    const value = window.prompt(t("Cộng thêm bao nhiêu phút cho các lượt chưa nộp?"), "10");
-    if (!value) return;
-    const additionalMinutes = Number(value);
-    if (!Number.isInteger(additionalMinutes) || additionalMinutes < 1) { setNotice(t("Số phút cần là số nguyên dương.")); return; }
-    const response = await fetch(`/api/teacher/quizzes/${quiz.id}/extend-attempts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ additionalMinutes }) });
-    setNotice(response.ok ? t("Đã gia hạn thời gian cho các lượt chưa nộp.") : t("Không gia hạn được thời gian."));
+  function extendAttempts(quiz: QuizRow) {
+    setTimeQuiz(quiz);
+    setAdditionalMinutes("10");
+    setTimeError("");
+  }
+
+  async function saveExtendedTime(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!timeQuiz || timeBusy) return;
+    const minutes = Number(additionalMinutes);
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) { setTimeError(t("Nhập số phút nguyên từ 1 đến 1440.")); return; }
+    setTimeBusy(true);
+    setTimeError("");
+    try {
+      const response = await fetch(`/api/teacher/quizzes/${timeQuiz.id}/extend-attempts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ additionalMinutes: minutes }) });
+      if (!response.ok) throw new Error();
+      setNotice(t("Đã gia hạn thời gian cho các lượt chưa nộp."));
+      setTimeQuiz(null);
+    } catch { setTimeError(t("Không gia hạn được thời gian.")); }
+    finally { setTimeBusy(false); }
   }
 
   async function copyLink(quiz: QuizRow) {
@@ -391,6 +408,14 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
         <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" onClick={() => void copyLink(detail.quiz)}>{t("Sao chép link")}</Button><Button type="button" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>{t("Sửa quiz")}</Button></div>
       </div>}
     </QuizSurface>}
+    {timeQuiz && <Modal title={t("Cộng thời gian làm")} closeLabel={t("Đóng")} onClose={() => { if (!timeBusy) setTimeQuiz(null); }}>
+      <form onSubmit={(event) => { void saveExtendedTime(event); }} className="space-y-5">
+        <div className="rounded-xl border border-line bg-surface-subtle p-4"><p className="font-semibold">{timeQuiz.title}</p><p className="mt-2 text-sm text-content-muted">{t("Cộng thêm cho mọi lượt chưa nộp. Lượt đã nộp và thời lượng của lượt mới không đổi.")}</p></div>
+        <label className="block text-sm font-semibold">{t("Số phút cộng thêm")}<input type="number" min="1" max="1440" step="1" required value={additionalMinutes} onChange={(event) => { setAdditionalMinutes(event.target.value); setTimeError(""); }} className="ds-field mt-2" /></label>
+        {timeError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{timeError}</p>}
+        <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" disabled={timeBusy} onClick={() => setTimeQuiz(null)}>{t("Hủy")}</Button><Button type="submit" disabled={timeBusy}>{timeBusy ? t("Đang lưu…") : t("Cộng thời gian")}</Button></div>
+      </form>
+    </Modal>}
     {linkQuiz && <Modal title={linkQuiz.status === "inactive" ? t("Mở lại quiz") : t("Gia hạn link quiz")} closeLabel={t("Đóng")} onClose={() => { if (!linkBusy) setLinkQuiz(null); }}>
       <form onSubmit={extendLink} className="space-y-5">
         <div className="rounded-xl border border-line bg-surface-subtle p-4">

@@ -3,6 +3,12 @@
 import { useCallback, useEffect, useState } from "react";
 
 const english: Record<string, string> = {
+  "Cộng thời gian làm": "Add time to active attempts",
+  "Cộng thêm cho mọi lượt chưa nộp. Lượt đã nộp và thời lượng của lượt mới không đổi.": "Add time to all unsubmitted attempts. Submitted attempts and the duration of new attempts stay unchanged.",
+  "Số phút cộng thêm": "Additional minutes",
+  "Nhập số phút nguyên từ 1 đến 1440.": "Enter a whole number of minutes from 1 to 1440.",
+  "Cộng thời gian": "Add time",
+  "Điều hướng câu hỏi": "Question navigation",
   "Tiến độ câu hỏi": "Question progress",
   "Câu trước": "Previous question",
   "Câu tiếp theo": "Next question",

@@ -121,6 +121,9 @@ html[data-theme="dark"] select:not(.quiz-select-trigger) { background-image: url
 @media (prefers-reduced-motion: reduce) { .quiz-student-option { transition: none; } .quiz-student-option:hover { transform: none; } }
 @media (max-width: 640px) { .quiz-student-main::before { margin: -1.25rem -1.25rem 1.5rem; } }
 .quiz-student-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.quiz-question-nav { scrollbar-width: thin; }
+.quiz-question-nav-item[aria-current="step"] { box-shadow: 0 4px 12px -6px var(--shadow-color); }
+.quiz-question-nav-item:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .quiz-editor { --mantine-color-body: var(--surface); --mantine-color-text: var(--foreground); border: 1px solid var(--line); border-radius: .75rem; background: var(--surface); color: var(--foreground); overflow: hidden; }
 .quiz-editor-toolbar { display: flex; flex-wrap: wrap; gap: .3rem; border-bottom: 1px solid var(--line); background: var(--surface-subtle); }
 .quiz-editor .mantine-RichTextEditor-content { min-height: 10rem; background: var(--surface); color: var(--foreground); }
