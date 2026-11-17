@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, ne, or } from "drizzle-orm";
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
@@ -11,6 +11,24 @@ function ownerFilter(user: { id: string; role: string }) {
 }
 
 export async function resultRoutes(app: FastifyInstance): Promise<void> {
+  app.get("/teacher/results/summary", { preHandler: [requireTeacherAccess] }, async (request) => {
+    const owner = ownerFilter(request.authUser!);
+    const quizRows = await db.select({ id: quizzes.id, title: quizzes.title, assignedClass: quizzes.assignedClass }).from(quizzes).where(and(owner, ne(quizzes.status, "deleted"))).orderBy(quizzes.title);
+    const attemptRows = await db.select({ quizId: submissions.quizId, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, gradingStatus: submissions.gradingStatus }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(and(owner, ne(quizzes.status, "deleted")));
+    const groups = new Map<string, { quizId: string; quizTitle: string; className: string; inProgress: number; submitted: number; needsReview: number; graded: number }>();
+    for (const quiz of quizRows) if (quiz.assignedClass) groups.set(`${quiz.id}\u0000${quiz.assignedClass}`, { quizId: quiz.id, quizTitle: quiz.title, className: quiz.assignedClass, inProgress: 0, submitted: 0, needsReview: 0, graded: 0 });
+    for (const row of attemptRows) {
+      const quiz = quizRows.find((item) => item.id === row.quizId);
+      if (!quiz) continue;
+      const key = `${quiz.id}\u0000${row.studentClass}`;
+      let group = groups.get(key);
+      if (!group) { group = { quizId: quiz.id, quizTitle: quiz.title, className: row.studentClass, inProgress: 0, submitted: 0, needsReview: 0, graded: 0 }; groups.set(key, group); }
+      if (!row.submittedAt) group.inProgress++;
+      else { group.submitted++; if (row.gradingStatus === "graded") group.graded++; else group.needsReview++; }
+    }
+    return { groups: [...groups.values()].sort((a, b) => a.className.localeCompare(b.className, "vi") || a.quizTitle.localeCompare(b.quizTitle, "vi")) };
+  });
+
   app.get("/teacher/results", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const query = z.object({ quizId: z.string().uuid().optional(), className: z.string().trim().max(80).optional(), search: z.string().trim().max(100).optional(), gradingStatus: z.enum(["pending", "needs_review", "graded"]).optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "invalid_request" });
@@ -71,13 +89,31 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
     return { saved: true, gradingStatus: essayMissing ? "needs_review" : "graded" };
   });
 
+  app.delete("/teacher/results/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    const [deleted] = await db.delete(submissions).where(and(eq(submissions.id, params.data.id), isNotNull(submissions.submittedAt), inArray(submissions.quizId, db.select({ id: quizzes.id }).from(quizzes).where(and(ownerFilter(request.authUser!), ne(quizzes.status, "deleted")))))).returning({ id: submissions.id });
+    if (!deleted) return reply.code(404).send({ error: "not_found" });
+    return reply.code(204).send();
+  });
+
+  app.delete("/teacher/quizzes/:id/results", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const query = z.object({ className: z.string().trim().min(1).max(80) }).safeParse(request.query);
+    if (!params.success || !query.success) return reply.code(400).send({ error: "invalid_request" });
+    const [quiz] = await db.select({ id: quizzes.id, assignedClass: quizzes.assignedClass }).from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), ownerFilter(request.authUser!))).limit(1);
+    if (!quiz || (quiz.assignedClass && quiz.assignedClass !== query.data.className)) return reply.code(404).send({ error: "not_found" });
+    const deleted = await db.delete(submissions).where(and(eq(submissions.quizId, quiz.id), eq(submissions.studentClass, query.data.className), isNotNull(submissions.submittedAt))).returning({ id: submissions.id });
+    return { deleted: deleted.length };
+  });
+
   app.get("/teacher/quizzes/:id/results.xlsx", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const query = z.object({ className: z.string().trim().max(80).optional() }).safeParse(request.query);
     if (!params.success || !query.success) return reply.code(400).send({ error: "invalid_request" });
     const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ownerFilter(request.authUser!))).limit(1);
     if (!quiz) return reply.code(404).send({ error: "not_found" });
-    const rows = await db.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), query.data.className ? eq(submissions.studentClass, query.data.className) : undefined)).orderBy(desc(submissions.submittedAt));
+    const rows = await db.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), isNotNull(submissions.submittedAt), query.data.className ? eq(submissions.studentClass, query.data.className) : undefined)).orderBy(desc(submissions.submittedAt));
     const workbook = new ExcelJS.Workbook();
     const sheet = workbook.addWorksheet("Kết quả");
     const english = request.authUser!.language === "en";

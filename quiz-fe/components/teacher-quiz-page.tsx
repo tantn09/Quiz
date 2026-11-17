@@ -21,12 +21,12 @@ type QuestionDraft = { id: string; type: "choice" | "essay"; prompt: string; opt
 
 type ImportIssue = { sheet: string; row: number; column: string; message: string };
 type ImportDraft = { title: string; description: string; promptDocument: PromptDocument; durationMinutes: number; linkExpiresAt: string | null; questions: { type: "choice" | "essay"; prompt: string; points: number; options: string[]; correctOption: number | null }[] };
-type QuizRow = { id: string; title: string; description: string; status: string; durationMinutes: number; linkToken: string; linkExpiresAt: string | null; subject: string | null; gradeLevel: string | null };
+type QuizRow = { id: string; title: string; description: string; status: string; durationMinutes: number; linkToken: string; linkExpiresAt: string | null; subject: string | null; gradeLevel: string | null; assignedClass: string | null };
 type CatalogItem = { id: string; name: string };
 type SavedDraft = { savedAt: number; title: string; description: string; promptDocument: PromptDocument; duration: number; expiresAt: string; subject: string; gradeLevel: string; questions: QuestionDraft[] };
 const DRAFT_TTL = 30 * 24 * 60 * 60 * 1000;
 type QuizDetail = { quiz: QuizRow & { promptDocument?: PromptDocument }; questions: { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }[] };
-type QuizActionsProps = { quiz: QuizRow; t: (value: string) => string; copyLink: (quiz: QuizRow) => Promise<void>; edit: (quiz: QuizRow) => Promise<void>; openLinkExpiry: (quiz: QuizRow) => void; extendAttempts: (quiz: QuizRow) => void; stop: (quiz: QuizRow) => Promise<void>; deleteQuiz: (quiz: QuizRow) => Promise<void> };
+type QuizActionsProps = { quiz: QuizRow; t: (value: string) => string; copyLink: (quiz: QuizRow) => Promise<void>; edit: (quiz: QuizRow) => Promise<void>; openLinkExpiry: (quiz: QuizRow) => void; extendAttempts: (quiz: QuizRow) => void; stop: (quiz: QuizRow) => Promise<void>; deleteQuiz: (quiz: QuizRow) => Promise<void>; cloneQuiz: (quiz: QuizRow) => void };
 const emptyQuestion = (): QuestionDraft => ({ id: crypto.randomUUID(), type: "choice", prompt: "", options: ["", ""], correctOption: -1, points: 1 });
 const localDateTime = (date: Date) => new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 const formatTimeFirst = (value: string) => { const date = new Date(value); return `${date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })} · ${date.toLocaleDateString("vi-VN")}`; };
@@ -72,7 +72,7 @@ function QuestionEditor({ question, index, count, collapsed, toggle, error, t, u
   </section>;
 }
 
-function QuizActions({ quiz, t, copyLink, edit, openLinkExpiry, extendAttempts, stop, deleteQuiz }: QuizActionsProps) {
+function QuizActions({ quiz, t, copyLink, edit, openLinkExpiry, extendAttempts, stop, deleteQuiz, cloneQuiz }: QuizActionsProps) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -96,6 +96,7 @@ function QuizActions({ quiz, t, copyLink, edit, openLinkExpiry, extendAttempts, 
       items[next]?.focus();
     }} className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-xl">
       <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void copyLink(quiz))}>{t("Sao chép link")}</button>
+      <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => cloneQuiz(quiz))}>Clone cho lớp khác</button>
       <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void edit(quiz))}>{t("Sửa")}</button>
       <button type="button" role="menuitem" className={itemClass} onClick={() => action(() => openLinkExpiry(quiz))}>{quiz.status === "inactive" ? t("Mở lại và gia hạn") : t("Gia hạn link")}</button>
       {quiz.status === "active" && <><button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void extendAttempts(quiz))}>{t("+ Thời gian làm")}</button><button type="button" role="menuitem" className={itemClass} onClick={() => action(() => void stop(quiz))}>{t("Ngừng")}</button></>}
@@ -119,6 +120,10 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   const [expiresAt, setExpiresAt] = useState("");
   const [subject, setSubject] = useState("");
   const [gradeLevel, setGradeLevel] = useState("");
+  const [assignedClass, setAssignedClass] = useState("");
+  const [cloneSource, setCloneSource] = useState<QuizRow | null>(null);
+  const [cloneClass, setCloneClass] = useState("");
+  const [cloneBusy, setCloneBusy] = useState(false);
   const [subjects, setSubjects] = useState<CatalogItem[]>([]);
   const [gradeLevels, setGradeLevels] = useState<CatalogItem[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -273,7 +278,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       title, description, promptDocument, durationMinutes: duration,
       subjectId: subjects.find((item) => item.name === subject)?.id ?? null,
       gradeLevelId: gradeLevels.find((item) => item.name === gradeLevel)?.id ?? null,
-      subject, gradeLevel,
+      subject, gradeLevel, assignedClass: assignedClass.trim() || null,
       linkExpiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
       questions: questions.map((question) => ({
         type: question.type, prompt: question.prompt,
@@ -299,7 +304,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     await load();
   }
 
-  function clearForm() { setEditing(null); setTitle(""); setDescription(""); setPromptDocument(emptyPrompt); setPromptOpen(false); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
+  function clearForm() { setEditing(null); setTitle(""); setDescription(""); setPromptDocument(emptyPrompt); setPromptOpen(false); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setAssignedClass(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
   function closeForm() { if (busy || importBusy) return; if (draftKey && draftReady && !draftCandidate) { try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions } satisfies SavedDraft)); } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); } } if (mode !== "list") { router.push(editing ? `/teacher/quizzes/${editing}` : "/teacher"); return; } setFormOpen(false); setFormError(""); setImportErrors([]); clearForm(); }
   function newQuiz() { router.push("/teacher/quizzes/new"); }
 
@@ -308,7 +313,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     const response = await fetch(`/api/teacher/quizzes/${quiz.id}`);
     if (!response.ok) { setNotice(t("Không tải được quiz để sửa.")); return; }
     const result = await response.json();
-    setEditing(quiz.id); setTitle(result.quiz.title); setDescription(result.quiz.description); setPromptDocument(result.quiz.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(result.quiz.promptDocument?.content?.length)); setDuration(result.quiz.durationMinutes); setSubject(result.quiz.subject ?? ""); setGradeLevel(result.quiz.gradeLevel ?? "");
+    setEditing(quiz.id); setTitle(result.quiz.title); setDescription(result.quiz.description); setPromptDocument(result.quiz.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(result.quiz.promptDocument?.content?.length)); setDuration(result.quiz.durationMinutes); setSubject(result.quiz.subject ?? ""); setGradeLevel(result.quiz.gradeLevel ?? ""); setAssignedClass(result.quiz.assignedClass ?? "");
     setExpiresAt(result.quiz.linkExpiresAt ? localDateTime(new Date(result.quiz.linkExpiresAt)) : "");
     setQuestions(result.questions.map((question: { type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1, points: question.points })));
     setCollapsedQuestionIds(new Set());
@@ -383,6 +388,16 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     finally { setTimeBusy(false); }
   }
 
+  async function cloneQuiz(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!cloneSource || !cloneClass.trim()) return;
+    setCloneBusy(true);
+    try { const response = await fetch(`/api/teacher/quizzes/${cloneSource.id}/clone`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assignedClass: cloneClass.trim() }) });
+      if (!response.ok) throw new Error();
+      setCloneSource(null); setCloneClass(""); setNotice("Đã clone quiz. Bản mới đang đóng; mở thủ công khi sẵn sàng."); await load();
+    } catch { setNotice("Không thể clone quiz."); } finally { setCloneBusy(false); }
+  }
+
   async function copyLink(quiz: QuizRow) {
     await navigator.clipboard.writeText(`${window.location.origin}/q/${quiz.linkToken}`);
     setNotice(t("Đã sao chép link quiz."));
@@ -401,6 +416,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       {detail && <div className="space-y-6">
         <div><h3 className="text-xl font-bold">{detail.quiz.title}</h3><p className="mt-2 whitespace-pre-wrap text-sm text-content-muted">{detail.quiz.description || t("Chưa có mô tả.")}</p></div>
         {detail.quiz.subject && <p className="text-sm"><strong>{t("Môn học")}:</strong> {detail.quiz.subject}</p>}
+        {detail.quiz.assignedClass && <p className="text-sm"><strong>Lớp được giao:</strong> {detail.quiz.assignedClass}</p>}
         {detail.quiz.gradeLevel && <p className="text-sm"><strong>{t("Khối lớp")}:</strong> {detail.quiz.gradeLevel}</p>}
         <div className="grid gap-3 sm:grid-cols-3"><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Trạng thái")}</p><p className="mt-1 font-semibold">{detail.quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}</p></div><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Thời lượng")}</p><p className="mt-1 font-semibold">{detail.quiz.durationMinutes} {t("phút")}</p></div><div className="rounded-xl bg-surface-subtle p-4"><p className="text-sm text-content-muted">{t("Hạn dùng link")}</p><p className="mt-1 font-semibold">{detail.quiz.linkExpiresAt ? formatTimeFirst(detail.quiz.linkExpiresAt) : t("Không có hạn")}</p></div></div>
         {Boolean(detail.quiz.promptDocument?.content?.length) && <section><h4 className="font-semibold">{t("Đề bài")}</h4><PromptView document={detail.quiz.promptDocument!} /></section>}
@@ -432,6 +448,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
         <div className="flex flex-wrap justify-end gap-3 border-t border-line pt-4"><Button type="button" variant="outline" disabled={linkBusy} onClick={() => setLinkQuiz(null)}>{t("Hủy")}</Button><Button type="submit" disabled={linkBusy}>{linkBusy ? t("Đang lưu…") : linkQuiz.status === "inactive" ? t("Mở lại quiz") : t("Lưu hạn mới")}</Button></div>
       </form>
     </Modal>}
+    {cloneSource && <Modal title="Clone quiz cho lớp khác" onClose={() => setCloneSource(null)}><form onSubmit={cloneQuiz} className="space-y-4"><p>{cloneSource.title}</p><label className="block text-sm font-medium">Lớp đích<input required maxLength={80} value={cloneClass} onChange={(event) => setCloneClass(event.target.value)} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label><p className="text-sm text-content-muted">Bản clone có link riêng và đang đóng. Mở quiz sau khi kiểm tra nội dung.</p><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setCloneSource(null)}>Hủy</Button><Button type="submit" disabled={cloneBusy}>Clone quiz</Button></div></form></Modal>}
     {draftCandidate && <Modal title="Bản nháp quiz" onClose={discardDraft}><p>Bạn có bản nháp lưu lúc {new Date(draftCandidate.savedAt).toLocaleString("vi-VN")}. Khôi phục để tiếp tục làm?</p><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="outline" onClick={discardDraft}>Bỏ bản nháp</Button><Button type="button" onClick={restoreDraft}>Khôi phục</Button></div></Modal>}
     {formOpen && <QuizSurface fullPage={mode !== "list"} title={editing ? t("Sửa quiz") : t("Tạo quiz mới")} onClose={closeForm}><form onSubmit={save} className={mode === "create" ? "mx-auto max-w-3xl" : "lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-6"}>{mode !== "create" && <nav aria-label={t("Mục lục tạo quiz")} className="mb-6 rounded-xl border border-line bg-surface-subtle p-3 lg:sticky lg:top-6 lg:mb-0"><p className="px-2 pb-2 text-sm font-bold">{t("Nội dung bài quiz")}</p><select aria-label={t("Mục lục tạo quiz")} defaultValue="" onChange={(event) => document.getElementById(event.target.value)?.scrollIntoView({ behavior: "smooth" })} className="w-full rounded-xl border border-line px-3 py-2 lg:hidden"><option value="" disabled>{t("Chọn mục")}</option><option value="quiz-info">{t("Thông tin quiz")}</option><option value="quiz-classes">{t("Môn học và lớp")} ()</option><option value="quiz-questions">{t("Câu hỏi")} ({questions.length})</option><option value="quiz-prompt">{t("Đề bài")}</option></select><div className="hidden gap-1 lg:grid"><a href="#quiz-info" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Thông tin quiz")}</a><a href="#quiz-classes" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Môn học và lớp")} ()</a><a href="#quiz-questions" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Câu hỏi")} ({questions.length})</a><a href="#quiz-prompt" className="rounded-lg px-2 py-2 text-sm hover:bg-surface">{t("Đề bài")}</a></div></nav>}<div className="min-w-0 space-y-6">
       {draftStatus && <p role="status" className="text-sm text-content-muted">{draftStatus}</p>}
@@ -439,7 +456,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
 
       <h3 id="quiz-info" className="scroll-mt-6 flex items-center gap-3 border-b border-line pb-3 text-lg font-bold">{mode === "create" && <span className="flex size-8 shrink-0 items-center justify-center rounded-full ds-gradient text-sm text-white">1</span>}{t("Thông tin quiz")}</h3>
       <div className="mt-5 grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium">{t("Tên quiz")}<input required value={title} onChange={(event) => setTitle(event.target.value)} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label><label className="text-sm font-medium">{t("Thời lượng (phút)")}<input required type="number" min={1} max={1440} value={duration} onChange={(event) => setDuration(Number(event.target.value))} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>{editing && <label className="text-sm font-medium sm:col-span-2">{t("Mô tả")}<textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={2} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>}{<div className="sm:col-span-2"><TimeFirstDateTime label={t("Hạn dùng link (để trống nếu không hết hạn)")} value={expiresAt} onChange={setExpiresAt} t={t} /></div>}</div>
-      <section id="quiz-classes" className="scroll-mt-6"><div className="grid gap-4 sm:grid-cols-2">{([["Môn học", subject, setSubject, subjects], ["Khối lớp", gradeLevel, setGradeLevel, gradeLevels]] as const).map(([label, value, setter, items]) => <div key={label} className="text-sm font-medium"><span className="mb-2 block">{t(label)}</span><Select value={value} onValueChange={setter} ariaLabel={t(label)} options={[{ value: "", label: `${t("Chọn")} ${t(label)}` }, ...(value && !items.some((item) => item.name === value) ? [{ value, label: `${value} (${t("Đã xóa")})` }] : []), ...items.map((item) => ({ value: item.name, label: item.name }))]} /></div>)}</div></section>
+      <section id="quiz-classes" className="scroll-mt-6">{!editing && <label className="mb-4 block text-sm font-medium">Lớp được giao<input maxLength={80} value={assignedClass} onChange={(event) => setAssignedClass(event.target.value)} placeholder="Ví dụ: 9/7" className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>}{editing && assignedClass && <p className="mb-4 text-sm">Lớp được giao: <strong>{assignedClass}</strong></p>}<div className="grid gap-4 sm:grid-cols-2">{([["Môn học", subject, setSubject, subjects], ["Khối lớp", gradeLevel, setGradeLevel, gradeLevels]] as const).map(([label, value, setter, items]) => <div key={label} className="text-sm font-medium"><span className="mb-2 block">{t(label)}</span><Select value={value} onValueChange={setter} ariaLabel={t(label)} options={[{ value: "", label: `${t("Chọn")} ${t(label)}` }, ...(value && !items.some((item) => item.name === value) ? [{ value, label: `${value} (${t("Đã xóa")})` }] : []), ...items.map((item) => ({ value: item.name, label: item.name }))]} /></div>)}</div></section>
       <div id="quiz-questions" className="scroll-mt-6 border-t border-line pt-6"><h3 className="flex items-center gap-3 text-lg font-bold">{mode === "create" && <span className="flex size-8 shrink-0 items-center justify-center rounded-full ds-gradient text-sm text-white">2</span>}{t("Câu hỏi")}</h3><p className="mt-1 text-sm text-content-muted">{t("Chọn loại câu hỏi, nhập nội dung và đáp án bên dưới.")}</p></div>
       <DragDropProvider onDragEnd={(event) => { if (event.canceled || !isSortable(event.operation.source)) return; const { initialIndex, index } = event.operation.source; if (initialIndex === index) return; setQuestions((current) => { const next = [...current]; const [moved] = next.splice(initialIndex, 1); next.splice(index, 0, moved); return next; }); setQuestionError(null); setFormError(""); setFormErrorTarget(""); }}><div className="space-y-4">{questions.map((question, index) => <QuestionEditor key={question.id} question={question} index={index} count={questions.length} collapsed={collapsedQuestionIds.has(question.id)} toggle={() => toggleQuestion(question.id)} duplicate={() => duplicateQuestion(index)} error={questionError === index ? questionErrorMessage : undefined} t={t} update={(changes) => updateQuestion(index, changes)} remove={() => { setQuestions((items) => items.filter((_, i) => i !== index)); setQuestionError(null); }} />)}</div></DragDropProvider>
       <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("choice")}>{t("+ Câu trắc nghiệm")}</Button><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("essay")}>{t("+ Câu tự luận")}</Button></div>
@@ -447,7 +464,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       <div className="sticky bottom-0 z-10 -mx-5 flex flex-wrap items-center justify-between gap-3 border-t border-line bg-surface px-5 py-4 sm:-mx-7 sm:px-7"><p className="text-sm text-content-muted">{questions.length} {t("câu hỏi")}</p><div className="flex gap-2"><Button type="button" variant="outline" onClick={closeForm} disabled={busy || importBusy}>{t("Hủy")}</Button><Button type="submit" disabled={busy || uploading || importBusy}>{busy ? t("Đang lưu…") : editing ? t("Lưu thay đổi") : t("Tạo quiz")}</Button></div></div>
     </div></form></QuizSurface>}
     {mode === "list" && <section className="mt-8 rounded-2xl border border-line bg-surface p-5 sm:p-7"><div className="flex flex-col gap-3 sm:flex-row"><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Tìm quiz")} className="min-w-0 flex-1 rounded-xl border border-line px-4 py-3" /><Select value={status} onValueChange={setStatus} ariaLabel={t("Tất cả trạng thái")} options={[{ value: "", label: t("Tất cả trạng thái") }, { value: "active", label: t("Đang mở") }, { value: "inactive", label: t("Đã ngừng") }]} className="sm:w-56" /></div>
-      <div className="mt-5 grid gap-3">{quizzes.map((quiz) => <article key={quiz.id} className="flex flex-col justify-between gap-4 rounded-xl border border-line p-4 sm:flex-row sm:items-center"><button type="button" onClick={() => void openDetail(quiz)} className="min-w-0 flex-1 rounded-lg text-left hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" aria-label={`${t("Xem chi tiết quiz")}: ${quiz.title}`}><h3 className="font-bold">{quiz.title}</h3><p className="mt-1 text-sm text-content-muted">{quiz.durationMinutes} {t("phút")} · {quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}{quiz.linkExpiresAt ? ` · ${t("Hết link")} ${formatTimeFirst(quiz.linkExpiresAt)}` : ""}</p><span className="mt-2 block text-xs font-medium text-brand">{t("Xem chi tiết")}</span></button><QuizActions quiz={quiz} t={t} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts} stop={stop} deleteQuiz={deleteQuiz} /></article>)}{quizzes.length === 0 && <EmptyState title={t("Chưa có quiz.")} />}</div>
+      <div className="mt-5 grid gap-3">{quizzes.map((quiz) => <article key={quiz.id} className="flex flex-col justify-between gap-4 rounded-xl border border-line p-4 sm:flex-row sm:items-center"><button type="button" onClick={() => void openDetail(quiz)} className="min-w-0 flex-1 rounded-lg text-left hover:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" aria-label={`${t("Xem chi tiết quiz")}: ${quiz.title}`}><h3 className="font-bold">{quiz.title}</h3><p className="mt-1 text-sm text-content-muted">{quiz.durationMinutes} {t("phút")} · {quiz.status === "active" ? t("Đang mở") : t("Đã ngừng")}{quiz.linkExpiresAt ? ` · ${t("Hết link")} ${formatTimeFirst(quiz.linkExpiresAt)}` : ""}</p><span className="mt-2 block text-xs font-medium text-brand">{t("Xem chi tiết")}</span></button><QuizActions quiz={quiz} t={t} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts} stop={stop} deleteQuiz={deleteQuiz} cloneQuiz={(quiz) => { setCloneSource(quiz); setCloneClass(""); }} /></article>)}{quizzes.length === 0 && <EmptyState title={t("Chưa có quiz.")} />}</div>
     </section>}
   </div></main></>;
 }

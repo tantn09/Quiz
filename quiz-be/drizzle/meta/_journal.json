@@ -57,6 +57,13 @@
       "when": 1794900000002,
       "tag": "0007_rich_prompt",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794900000003,
+      "tag": "0008_assigned_class",
+      "breakpoints": true
     }
   ]
 }

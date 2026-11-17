@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../db/index.js";
 import { answers, questions, quizzes, submissions, type QuestionSnapshot } from "../db/schema.js";
 
-const identityBody = z.object({ name: z.string().trim().min(1).max(160), className: z.string().trim().min(1).max(80) });
+const identityBody = z.object({ name: z.string().trim().min(1).max(160), className: z.string().trim().min(1).max(80).optional() });
 const answersBody = z.object({ answers: z.record(z.string().uuid(), z.union([z.string().max(10000), z.number().int().min(0), z.null()])) });
 const digest = (token: string) => createHash("sha256").update(token).digest("hex");
 const identityKey = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("vi");
@@ -33,7 +33,7 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const [quiz] = await db.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).limit(1);
     if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return reply.code(410).send({ error: "link_expired" });
     const items = await db.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
-    return { quiz: { title: quiz.title, description: quiz.description, promptDocument: quiz.promptDocument, subject: quiz.subject, gradeLevel: quiz.gradeLevel }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
+    return { quiz: { title: quiz.title, description: quiz.description, promptDocument: quiz.promptDocument, subject: quiz.subject, gradeLevel: quiz.gradeLevel, assignedClass: quiz.assignedClass }, questions: items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points })) };
   });
 
   app.post("/public/quizzes/:token/start", async (request, reply) => {
@@ -44,8 +44,10 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const result = await db.transaction(async (tx) => {
       const [quiz] = await tx.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).for("update").limit(1);
       if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return { kind: "expired" as const };
+      const studentClass = quiz.assignedClass ?? body.data.className;
+      if (!studentClass) return { kind: "invalid" as const };
       const nameKey = identityKey(body.data.name);
-      const classKey = identityKey(body.data.className);
+      const classKey = identityKey(studentClass);
       const [existing] = await tx.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))).limit(1);
       if (existing) return { kind: "duplicate" as const };
       const items = await tx.select().from(questions).where(eq(questions.quizId, quiz.id)).orderBy(questions.position);
@@ -60,10 +62,11 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       }));
       const startedAt = new Date();
       const dueAt = new Date(startedAt.getTime() + quiz.durationMinutes * 60_000);
-      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, studentName: body.data.name, studentClass: body.data.className, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
+      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, studentName: body.data.name, studentClass, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
       return { kind: "created" as const, quiz, attempt, snapshot };
     });
     if (result.kind === "expired") return reply.code(410).send({ error: "link_expired" });
+    if (result.kind === "invalid") return reply.code(400).send({ error: "class_required" });
     if (result.kind === "duplicate") return reply.code(409).send({ error: "attempt_exists" });
     return reply.code(201).send({ attempt: { id: result.attempt.id, startedAt: result.attempt.startedAt, dueAt: result.attempt.dueAt }, resumeToken, quiz: { title: result.quiz.title, prompt: result.attempt.promptSnapshot }, questions: publicQuestions(result.snapshot) });
   });

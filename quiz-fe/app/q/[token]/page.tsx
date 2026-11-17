@@ -11,7 +11,7 @@ import { Input, Textarea } from "@/components/ui/field";
 import { Modal } from "@mantine/core";
 
 type QuizQuestion = { id: string; position: number; type: "choice" | "essay"; prompt: string; options: string[]; points: number };
-type QuizInfo = { title: string; description: string; promptDocument: JSONContent; subject?: string | null; gradeLevel?: string | null };
+type QuizInfo = { title: string; description: string; promptDocument: JSONContent; subject?: string | null; gradeLevel?: string | null; assignedClass?: string | null };
 type Attempt = { id: string; dueAt: string; submitted: boolean };
 type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean };
 
@@ -153,7 +153,7 @@ export default function StudentQuizPage() {
       if (response.status === 409) throw new Error(t("Tên và lớp này đã có lượt làm cho quiz."));
       if (!response.ok) throw new Error(t("Không thể bắt đầu quiz. Hãy kiểm tra link và kết nối mạng."));
       const payload = await response.json();
-      const state: SavedState = { attemptId: payload.attempt.id, resumeToken: payload.resumeToken, answers: {}, studentName: name, studentClass: className };
+      const state: SavedState = { attemptId: payload.attempt.id, resumeToken: payload.resumeToken, answers: {}, studentName: name, studentClass: quiz?.assignedClass ?? className };
       localStorage.setItem(storageKey, JSON.stringify(state));
       setSaved(state);
       setAttempt({ ...payload.attempt, submitted: false });
@@ -193,10 +193,10 @@ export default function StudentQuizPage() {
         {attempt && error && <p role="alert" className="mt-5 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
         {!attempt && quiz && <form onSubmit={start} className="quiz-student-entry mt-7 rounded-2xl border border-line bg-surface-subtle p-5 sm:p-7">
           <h2 className="text-lg font-bold">{t("Thông tin học sinh")}</h2>
-          <p className="mt-1 text-sm text-content-muted">{t("Nhập tên và lớp để bắt đầu làm bài.")}</p>
+          <p className="mt-1 text-sm text-content-muted">{quiz.assignedClass ? `Bài dành cho lớp ${quiz.assignedClass}. Nhập họ tên để bắt đầu.` : t("Nhập tên và lớp để bắt đầu làm bài.")}</p>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <label className="block text-sm font-semibold">{t("Họ và tên")}<Input required autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} className="mt-2 bg-surface" /></label>
-            <label className="block text-sm font-semibold">{t("Lớp")}<Input required autoComplete="off" value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2 bg-surface" /></label>
+            {!quiz.assignedClass && <label className="block text-sm font-semibold">{t("Lớp")}<Input required autoComplete="off" value={className} onChange={(event) => setClassName(event.target.value)} className="mt-2 bg-surface" /></label>}
           </div>
           {error && <p role="alert" className="mt-4 rounded-xl ds-warning px-4 py-3 text-sm">{error}</p>}
           <Button type="submit" disabled={busy} className="mt-5 w-full sm:w-auto">{busy ? t("Đang bắt đầu…") : t("Bắt đầu làm bài")}</Button>

@@ -32,6 +32,7 @@ export const quizInput = z.object({
   gradeLevelId: z.string().uuid().nullable().default(null),
   subject: z.string().trim().max(120).optional(),
   gradeLevel: z.string().trim().max(120).optional(),
+  assignedClass: z.string().trim().max(80).nullable().default(null),
   questions: z.array(questionInput).min(1).max(200),
 });
 
@@ -76,6 +77,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
         description: parsed.data.description,
         promptDocument: parsed.data.promptDocument,
         durationMinutes: parsed.data.durationMinutes,
+        assignedClass: parsed.data.assignedClass,
         ...labels,
         linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null,
         linkToken,
@@ -107,7 +109,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       if (!existing) return null;
       const labels = await resolveLabels(parsed.data, existing);
       if (!labels) return null;
-      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptDocument: parsed.data.promptDocument, durationMinutes: parsed.data.durationMinutes, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
+      const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptDocument: parsed.data.promptDocument, durationMinutes: parsed.data.durationMinutes, assignedClass: existing.assignedClass, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
       if (!quiz) return null;
       await tx.delete(questions).where(eq(questions.quizId, quiz.id));
       await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, position })));
@@ -115,6 +117,22 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     });
     if (!updated) return reply.code(404).send({ error: "not_found" });
     return { quiz: updated };
+  });
+
+  app.post("/teacher/quizzes/:id/clone", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
+    const body = z.object({ assignedClass: z.string().trim().min(1).max(80) }).safeParse(request.body);
+    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    const cloned = await db.transaction(async (tx) => {
+      const [source] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
+      if (!source) return null;
+      const sourceQuestions = await tx.select().from(questions).where(eq(questions.quizId, source.id)).orderBy(questions.position);
+      const [quiz] = await tx.insert(quizzes).values({ teacherId: source.teacherId, title: source.title, description: source.description, promptDocument: source.promptDocument, status: "inactive", durationMinutes: source.durationMinutes, subject: source.subject, gradeLevel: source.gradeLevel, assignedClass: body.data.assignedClass, linkExpiresAt: source.linkExpiresAt && source.linkExpiresAt > new Date() ? source.linkExpiresAt : null, linkToken: randomBytes(24).toString("base64url") }).returning();
+      if (sourceQuestions.length) await tx.insert(questions).values(sourceQuestions.map(({ position, type, prompt, options, correctOption, points }) => ({ quizId: quiz.id, position, type, prompt, options, correctOption, points })));
+      return quiz;
+    });
+    if (!cloned) return reply.code(404).send({ error: "not_found" });
+    return reply.code(201).send({ quiz: cloned, link: `/q/${cloned.linkToken}` });
   });
 
   app.post("/teacher/quizzes/:id/stop", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
@@ -145,7 +163,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
     const filters = [eq(quizzes.id, params.data.id), eq(quizzes.status, "inactive")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const [existing] = await db.select().from(quizzes).where(and(...filters)).limit(1);
-    if (!existing || (!body.data.linkExpiresAt && (!existing.linkExpiresAt || existing.linkExpiresAt <= new Date()))) return reply.code(400).send({ error: "invalid_request" });
+    if (!existing || (!body.data.linkExpiresAt && existing.linkExpiresAt && existing.linkExpiresAt <= new Date())) return reply.code(400).send({ error: "invalid_request" });
     const [updated] = await db.update(quizzes).set({ status: "active", ...(body.data.linkExpiresAt ? { linkExpiresAt: new Date(body.data.linkExpiresAt) } : {}), updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id, status: quizzes.status, linkExpiresAt: quizzes.linkExpiresAt });
     if (!updated) return reply.code(404).send({ error: "not_found" });
     return { quiz: updated };

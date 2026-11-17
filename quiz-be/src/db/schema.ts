@@ -48,6 +48,7 @@ export const quizzes = pgTable("quizzes", {
   durationMinutes: integer("duration_minutes").notNull(),
   subject: varchar("subject", { length: 120 }),
   gradeLevel: varchar("grade_level", { length: 120 }),
+  assignedClass: varchar("assigned_class", { length: 80 }),
   linkExpiresAt: timestamp("link_expires_at", { withTimezone: true }),
   linkToken: varchar("link_token", { length: 64 }).notNull().unique(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
