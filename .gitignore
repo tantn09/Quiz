@@ -10,3 +10,4 @@ coverage/
 *.log
 *.tsbuildinfo
 quiz-be/uploads/
+/release.zip

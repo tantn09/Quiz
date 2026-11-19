@@ -9,7 +9,10 @@
     "typecheck": "pnpm --recursive typecheck",
     "db:generate": "pnpm --filter @quiz/api db:generate",
     "db:migrate": "pnpm --filter @quiz/api db:migrate",
-    "db:seed-admin": "pnpm --filter @quiz/api db:seed-admin"
+    "db:seed-admin": "pnpm --filter @quiz/api db:seed-admin",
+    "release:publish": "node scripts/publish-images.mjs",
+    "release:publish:api": "node scripts/publish-images.mjs --service api",
+    "release:publish:web": "node scripts/publish-images.mjs --service web"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

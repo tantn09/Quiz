@@ -9,6 +9,9 @@ quiz-be/uploads
 **/.next-dev
 .env
 .env.*
+**/.env
+release/
+release.zip
 !.env.example
 *.log
 coverage

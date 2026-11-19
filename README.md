@@ -80,3 +80,7 @@ Lưu bản sao lưu ngoài VPS và kiểm tra quy trình khôi phục định k�
 ## Triển khai trên Windows qua Cloudflare Tunnel
 
 Xem [hướng dẫn Hyper-V, Ubuntu và Cloudflare Tunnel](docs/windows-hyperv-cloudflare.md) để cài đặt, kiểm tra sau reboot, cập nhật, sao lưu và khôi phục.
+
+Để gửi bộ cài cho một máy Windows khác, dùng thư mục [release](release/README.md).
+
+Để build và đẩy image lên Docker Hub cho bản cập nhật, chạy `pnpm release:publish` (cả hai), `pnpm release:publish:api` (chỉ API), hoặc `pnpm release:publish:web` (chỉ web) từ thư mục gốc repo.
