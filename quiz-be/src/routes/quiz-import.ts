@@ -34,7 +34,7 @@ export async function quizImportRoutes(app: FastifyInstance): Promise<void> {
     for (let i = 3; i <= 12; i++) questions.getColumn(i).width = 16;
     for (let row = 2; row <= 201; row++) {
       questions.getCell(`A${row}`).dataValidation = { type: "list", allowBlank: true, formulae: ['"choice,essay"'] };
-      questions.getCell(`C${row}`).dataValidation = { type: "whole", operator: "between", allowBlank: true, formulae: [0, 1000] };
+      questions.getCell(`C${row}`).dataValidation = { type: "decimal", operator: "between", allowBlank: true, formulae: [0, 1000] };
       questions.getCell(`L${row}`).dataValidation = { type: "whole", operator: "between", allowBlank: true, formulae: [1, 8] };
     }
     const guide = workbook.addWorksheet("Hướng dẫn");
@@ -91,9 +91,9 @@ export async function quizImportRoutes(app: FastifyInstance): Promise<void> {
       const optionsRaw = rest.slice(0, 8);
       const options = optionsRaw.filter(Boolean);
       if (options.some((_, index) => !optionsRaw[index])) errors.push({ sheet: "Questions", row, column: "option1–option8", message: "Các lựa chọn cần liền nhau, không bỏ trống ở giữa." });
-      const points = pointsText === "" ? 1 : Number(pointsText);
+      const points = pointsText === "" ? 1 : Number(pointsText.replace(",", "."));
       const answer = rest[8] === "" ? null : Number(rest[8]);
-      if (!Number.isInteger(points)) errors.push({ sheet: "Questions", row, column: "points", message: "Điểm cần là số nguyên." });
+      if (!Number.isFinite(points) || !Number.isInteger(points * 4)) errors.push({ sheet: "Questions", row, column: "points", message: "Điểm cần theo bước 0.25." });
       if (answer !== null && !Number.isInteger(answer)) errors.push({ sheet: "Questions", row, column: "correctOption", message: "Đáp án cần là số nguyên từ 1." });
       if (type === "essay" && (options.length || answer !== null)) errors.push({ sheet: "Questions", row, column: "correctOption", message: "Câu tự luận không có lựa chọn hoặc đáp án." });
       parsedQuestions.push({ type, prompt, points, options, correctOption: answer === null ? null : answer - 1 });

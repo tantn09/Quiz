@@ -43,7 +43,7 @@ export default function LoginPage() {
   return (
     <main className="ds-gradient-soft flex min-h-screen items-center justify-center px-5 py-12">
       <form onSubmit={submit} className="w-full max-w-md rounded-3xl border border-line bg-surface p-8 shadow-sm">
-        <p className="text-sm font-semibold text-brand">{t("QUIZ LỚP HỌC")}</p>
+        <p className="text-sm font-semibold text-brand">{t("BÀI KIỂM TRA LỚP HỌC")}</p>
         <h1 className="mt-3 text-3xl font-bold">{t("Đăng nhập")}</h1>
         <p className="mt-2 text-content-muted">{t("Dành cho Admin và giáo viên.")}</p>
         <label className="mt-7 block text-sm font-medium">{t("Tên đăng nhập")}

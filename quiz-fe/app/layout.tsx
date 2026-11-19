@@ -9,8 +9,8 @@ import "./globals.css";
 const beVietnamPro = Be_Vietnam_Pro({ subsets: ["latin", "vietnamese"], weight: ["400", "500", "600", "700", "800", "900"], display: "swap", variable: "--font-be-vietnam-pro" });
 
 export const metadata: Metadata = {
-  title: "Quiz lớp học",
-  description: "Tạo bài quiz, giao bài và xem kết quả học tập.",
+  title: "Bài kiểm tra lớp học",
+  description: "Tạo bài kiểm tra, giao bài và xem kết quả học tập.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

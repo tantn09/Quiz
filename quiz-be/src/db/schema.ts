@@ -1,4 +1,4 @@
-import { boolean, integer, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 export const userRole = pgEnum("user_role", ["admin", "teacher"]);
 
@@ -64,7 +64,7 @@ export const questions = pgTable("questions", {
   prompt: text("prompt").notNull(),
   options: jsonb("options").$type<string[]>().notNull().default([]),
   correctOption: integer("correct_option"),
-  points: integer("points").notNull().default(1),
+  points: numeric("points", { precision: 8, scale: 2, mode: "number" }).notNull().default(1),
 });
 
 export const quizVariants = pgTable("quiz_variants", {
@@ -76,10 +76,30 @@ export const quizVariants = pgTable("quiz_variants", {
   assignedCount: integer("assigned_count").notNull().default(0),
 }, (table) => [uniqueIndex("quiz_variant_code").on(table.quizId, table.code)]);
 
+export const students = pgTable("students", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  teacherId: uuid("teacher_id").notNull().references(() => users.id),
+  name: varchar("name", { length: 160 }).notNull(),
+  className: varchar("class_name", { length: 80 }).notNull(),
+  nameKey: varchar("name_key", { length: 160 }).notNull(),
+  classKey: varchar("class_key", { length: 80 }).notNull(),
+  deleted: boolean("deleted").notNull().default(false),
+}, (table) => [uniqueIndex("student_identity").on(table.teacherId, table.classKey, table.nameKey)]);
+
+export const accessRequests = pgTable("access_requests", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  quizId: uuid("quiz_id").notNull().references(() => quizzes.id),
+  name: varchar("name", { length: 160 }).notNull(),
+  nameKey: varchar("name_key", { length: 160 }).notNull(),
+  receiptHash: varchar("receipt_hash", { length: 64 }).notNull(),
+  status: varchar("status", { length: 16 }).notNull().default("pending"),
+}, (table) => [uniqueIndex("access_request_identity").on(table.quizId, table.nameKey)]);
+
 export const submissions = pgTable("submissions", {
   id: uuid("id").defaultRandom().primaryKey(),
   quizId: uuid("quiz_id").notNull().references(() => quizzes.id),
   variantId: uuid("variant_id").references(() => quizVariants.id),
+  studentId: uuid("student_id").references(() => students.id),
   studentName: varchar("student_name", { length: 160 }).notNull(),
   studentClass: varchar("student_class", { length: 80 }).notNull(),
   studentNameKey: varchar("student_name_key", { length: 160 }).notNull(),
@@ -88,11 +108,11 @@ export const submissions = pgTable("submissions", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
-  score: integer("score"),
+  score: numeric("score", { precision: 8, scale: 2, mode: "number" }),
   gradingStatus: varchar("grading_status", { length: 16 }).notNull().default("pending"),
   questionSnapshot: jsonb("question_snapshot").$type<QuestionSnapshot[]>().notNull(),
   promptSnapshot: jsonb("prompt_snapshot").$type<PromptDocument>(),
-}, (table) => [uniqueIndex("submission_quiz_student_identity").on(table.quizId, table.studentNameKey, table.studentClassKey)]);
+}, (table) => [uniqueIndex("submission_quiz_student_identity").on(table.quizId, table.studentNameKey, table.studentClassKey), uniqueIndex("submission_student").on(table.quizId, table.studentId)]);
 
 export type PromptImage = { id: string; alt: string };
 export type PromptDocument = { type: "doc"; content: unknown[] };
@@ -121,7 +141,7 @@ export const answers = pgTable("answers", {
   submissionId: uuid("submission_id").notNull().references(() => submissions.id, { onDelete: "cascade" }),
   questionId: uuid("question_id").notNull(),
   answer: text("answer"),
-  awardedPoints: integer("awarded_points"),
+  awardedPoints: numeric("awarded_points", { precision: 8, scale: 2, mode: "number" }),
   isCorrect: boolean("is_correct"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex("answer_submission_question").on(table.submissionId, table.questionId)]);

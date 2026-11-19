@@ -10,8 +10,9 @@ export function ThemeBootstrap() {
       if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
       if (language === "vi" || language === "en") {
         document.documentElement.lang = language;
-        document.title = language === "en" ? "Classroom Quiz" : "Quiz lớp học";
-        document.querySelector('meta[name="description"]')?.setAttribute("content", language === "en" ? "Create quizzes, share links, and review student results." : "Tạo bài quiz, giao bài và xem kết quả học tập.");
+        if (window.location.pathname !== "/") return;
+        document.title = language === "en" ? "Classroom Quiz" : "Bài kiểm tra lớp học";
+        document.querySelector('meta[name="description"]')?.setAttribute("content", language === "en" ? "Create quizzes, share links, and review student results." : "Tạo bài kiểm tra, giao bài và xem kết quả học tập.");
       }
     };
     applyPreferences();

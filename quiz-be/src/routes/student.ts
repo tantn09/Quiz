@@ -1,14 +1,15 @@
+import { identityKey } from "./roster.js";
 import { createHash, randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../db/index.js";
-import { answers, questions, quizzes, quizVariants, submissions, type QuestionSnapshot } from "../db/schema.js";
+import { answers, questions, quizzes, quizVariants, students, submissions, type QuestionSnapshot } from "../db/schema.js";
 
 const identityBody = z.object({ name: z.string().trim().min(1).max(160), className: z.string().trim().max(80).optional() });
 const answersBody = z.object({ answers: z.record(z.string().uuid(), z.union([z.string().max(10000), z.number().int().min(0), z.null()])) });
 const digest = (token: string) => createHash("sha256").update(token).digest("hex");
-const identityKey = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("vi");
+
 
 function publicQuestions(items: QuestionSnapshot[]) {
   return items.map(({ id, position, type, prompt, options, points }) => ({ id, position, type, prompt, options, points }));
@@ -47,7 +48,10 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       if (!studentClass) return { kind: "invalid" as const };
       const nameKey = identityKey(body.data.name);
       const classKey = identityKey(studentClass);
-      const [existing] = await tx.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))).limit(1);
+      const roster = quiz.assignedClass ? await tx.select({ id: students.id, name: students.name, nameKey: students.nameKey }).from(students).where(and(eq(students.teacherId, quiz.teacherId), eq(students.classKey, classKey), eq(students.deleted, false))) : [];
+      const student = roster.find((member) => member.nameKey === nameKey);
+      if (roster.length && !student) return { kind: "not_listed" as const };
+      const [existing] = await tx.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), or(student ? eq(submissions.studentId, student.id) : undefined, and(eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))))).limit(1);
       if (existing) return { kind: "duplicate" as const };
       const [variant] = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.active, true), eq(quizVariants.deleted, false))).orderBy(quizVariants.assignedCount, quizVariants.code).limit(1);
       if (!variant) return { kind: "invalid" as const };
@@ -63,12 +67,13 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       }));
       const startedAt = new Date();
       const dueAt = new Date(startedAt.getTime() + quiz.durationMinutes * 60_000);
-      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, variantId: variant.id, studentName: body.data.name, studentClass, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
+      const [attempt] = await tx.insert(submissions).values({ quizId: quiz.id, variantId: variant.id, studentId: student?.id, studentName: student?.name ?? body.data.name, studentClass, studentNameKey: nameKey, studentClassKey: classKey, resumeTokenHash: digest(resumeToken), startedAt, dueAt, questionSnapshot: snapshot, promptSnapshot: quiz.promptDocument }).returning();
       await tx.update(quizVariants).set({ assignedCount: sql`${quizVariants.assignedCount} + 1` }).where(eq(quizVariants.id, variant.id));
       return { kind: "created" as const, quiz, attempt, snapshot, code: variant.code };
     });
     if (result.kind === "expired") return reply.code(410).send({ error: "link_expired" });
     if (result.kind === "invalid") return reply.code(400).send({ error: "class_required" });
+    if (result.kind === "not_listed") return reply.code(403).send({ error: "student_not_listed" });
     if (result.kind === "duplicate") return reply.code(409).send({ error: "attempt_exists" });
     return reply.code(201).send({ attempt: { id: result.attempt.id, startedAt: result.attempt.startedAt, dueAt: result.attempt.dueAt, variantCode: result.code }, resumeToken, quiz: { title: result.quiz.title, prompt: result.attempt.promptSnapshot }, questions: publicQuestions(result.snapshot) });
   });
@@ -91,12 +96,17 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     if (attempt.dueAt <= new Date()) return reply.code(409).send({ error: "time_expired" });
     const ids = new Set(attempt.questionSnapshot.map((question) => question.id));
     const entries = Object.entries(body.data.answers).filter(([id]) => ids.has(id));
-    await db.transaction(async (tx) => {
+    const saved = await db.transaction(async (tx) => {
+      const [current] = await tx.select({ submittedAt: submissions.submittedAt, dueAt: submissions.dueAt }).from(submissions).where(eq(submissions.id, attempt.id)).for("update");
+      if (!current || current.submittedAt) return "already_submitted";
+      if (current.dueAt <= new Date()) return "time_expired";
       for (const [questionId, value] of entries) {
         await tx.insert(answers).values({ submissionId: attempt.id, questionId, answer: String(value ?? ""), updatedAt: new Date() })
           .onConflictDoUpdate({ target: [answers.submissionId, answers.questionId], set: { answer: String(value ?? ""), updatedAt: new Date() } });
       }
+      return null;
     });
+    if (saved) return reply.code(409).send({ error: saved });
     return { savedAt: new Date().toISOString() };
   });
 
@@ -109,15 +119,17 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const byId = new Map(attempt.questionSnapshot.map((question) => [question.id, question]));
     const entries = Object.entries(body.data.answers).filter(([id]) => byId.has(id));
     let autoScore = 0;
-    let hasEssay = attempt.questionSnapshot.some((question) => question.type === "essay");
-    await db.transaction(async (tx) => {
+    const hasEssay = attempt.questionSnapshot.some((question) => question.type === "essay");
+    const submitted = await db.transaction(async (tx) => {
+      const [current] = await tx.select({ submittedAt: submissions.submittedAt }).from(submissions).where(eq(submissions.id, attempt.id)).for("update");
+      if (!current || current.submittedAt) return false;
       for (const [questionId, value] of entries) {
         const question = byId.get(questionId)!;
         if (question.type === "essay") {
           await tx.insert(answers).values({ submissionId: attempt.id, questionId, answer: String(value ?? ""), awardedPoints: null, isCorrect: null, updatedAt: new Date() })
             .onConflictDoUpdate({ target: [answers.submissionId, answers.questionId], set: { answer: String(value ?? ""), updatedAt: new Date() } });
         } else {
-          const isCorrect = Number(value) === question.correctOption;
+          const isCorrect = value !== null && value !== "" && Number(value) === question.correctOption;
           const score = isCorrect ? question.points : 0;
           autoScore += score;
           await tx.insert(answers).values({ submissionId: attempt.id, questionId, answer: String(value ?? ""), awardedPoints: score, isCorrect, updatedAt: new Date() })
@@ -125,7 +137,9 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
         }
       }
       await tx.update(submissions).set({ submittedAt: new Date(), score: autoScore, gradingStatus: hasEssay ? "needs_review" : "graded" }).where(and(eq(submissions.id, attempt.id), isNull(submissions.submittedAt)));
+      return true;
     });
+    if (!submitted) return reply.code(409).send({ error: "already_submitted" });
     return reply.code(201).send({ submitted: true });
   });
 }

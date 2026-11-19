@@ -43,7 +43,8 @@ export function DashboardNav({ admin = false }: DashboardNavProps) {
     ...(admin ? [{ href: "/admin", label: t("Tổng quan"), icon: LayoutDashboard }] : []),
     ...(admin ? [{ href: "/admin/teachers", label: t("Giáo viên"), icon: Users }] : []),
     ...(admin ? [{ href: "/admin/catalogs", label: t("Danh mục"), icon: GraduationCap }] : []),
-    { href: "/teacher", label: t("Quiz"), icon: BookOpenCheck },
+    { href: "/teacher", label: t("Bài kiểm tra"), icon: BookOpenCheck },
+    { href: "/teacher/students", label: t("Học sinh"), icon: Users },
     { href: "/teacher/results", label: t("Kết quả"), icon: BarChart3 },
     { href: "/settings", label: t("Cài đặt"), icon: Settings },
   ];
@@ -73,7 +74,7 @@ export function DashboardNav({ admin = false }: DashboardNavProps) {
       <div className="flex items-center justify-between px-2">
         <Link href={admin ? "/admin" : "/teacher"} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl ds-gradient text-white"><GraduationCap size={22} aria-hidden="true" /></span>
-          <span><span className="block text-sm font-bold tracking-wide text-content">CLASSROOM</span><span className="block text-xs text-content-muted">{t("Quiz lớp học")}</span></span>
+          <span><span className="block text-sm font-bold tracking-wide text-content">CLASSROOM</span><span className="block text-xs text-content-muted">{t("Bài kiểm tra lớp học")}</span></span>
         </Link>
         <button type="button" onClick={() => setOpen(false)} aria-label={t("Đóng menu")} className="flex h-10 w-10 items-center justify-center rounded-lg text-content-muted hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:hidden"><X size={20} aria-hidden="true" /></button>
       </div>

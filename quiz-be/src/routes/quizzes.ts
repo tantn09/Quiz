@@ -12,7 +12,7 @@ const questionInput = z.object({
   prompt: z.string().trim().min(1).max(5000),
   options: z.array(z.string().trim().min(1).max(500)).max(8).default([]),
   correctOption: z.number().int().min(0).nullable().default(null),
-  points: z.number().int().min(0).max(1000).default(1),
+  points: z.number().min(0).max(1000).multipleOf(0.25).default(1),
 }).superRefine((question, context) => {
   if (question.type === "choice" && (question.options.length < 2 || question.correctOption === null || question.correctOption >= question.options.length)) {
     context.addIssue({ code: "custom", message: "Câu trắc nghiệm cần ít nhất hai lựa chọn và đáp án đúng hợp lệ." });
@@ -64,7 +64,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
-    const parsed = quizInput.safeParse(request.body);
+    const parsed = quizInput.extend({ assignedClass: z.string().trim().min(1).max(80) }).safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
     const labels = await resolveLabels(parsed.data);
     if (!labels) return reply.code(400).send({ error: "invalid_catalog_selection" });

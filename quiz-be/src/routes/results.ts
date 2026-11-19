@@ -59,35 +59,33 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
 
   app.patch("/teacher/results/:id/grade", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    const body = z.object({ scores: z.record(z.string().uuid(), z.number().int().min(0).max(1000)) }).safeParse(request.body);
+    const body = z.object({ scores: z.record(z.string().uuid(), z.number().min(0).max(1000).multipleOf(0.25)) }).safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
-    const [row] = await db.select({ submission: submissions, teacherId: quizzes.teacherId }).from(submissions)
-      .innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(eq(submissions.id, params.data.id)).limit(1);
-    if (!row || (request.authUser!.role !== "admin" && row.teacherId !== request.authUser!.id)) return reply.code(404).send({ error: "not_found" });
-    const essayIds = new Set(row.submission.questionSnapshot.filter((question) => question.type === "essay").map((question) => question.id));
-    if (Object.keys(body.data.scores).some((id) => !essayIds.has(id))) return reply.code(400).send({ error: "invalid_question" });
-    for (const question of row.submission.questionSnapshot.filter((item) => item.type === "essay")) {
-      const score = body.data.scores[question.id];
-      if (score !== undefined && score > question.points) return reply.code(400).send({ error: "score_exceeds_points" });
-    }
-    const currentAnswers = await db.select().from(answers).where(eq(answers.submissionId, row.submission.id));
-    let essayMissing = false;
-    await db.transaction(async (tx) => {
+    const result = await db.transaction(async (tx) => {
+      const [row] = await tx.select({ submission: submissions }).from(submissions)
+        .innerJoin(quizzes, eq(submissions.quizId, quizzes.id))
+        .where(and(eq(submissions.id, params.data.id), ownerFilter(request.authUser!), isNotNull(submissions.submittedAt)))
+        .for("update", { of: submissions });
+      if (!row) return { error: "not_found" } as const;
+      const questions = row.submission.questionSnapshot;
+      const essays = new Map(questions.filter((question) => question.type === "essay").map((question) => [question.id, question]));
+      for (const [id, award] of Object.entries(body.data.scores)) {
+        const question = essays.get(id);
+        if (!question) return { error: "invalid_question" } as const;
+        if (award > question.points) return { error: "score_exceeds_points" } as const;
+      }
       for (const [questionId, awardedPoints] of Object.entries(body.data.scores)) {
-        await tx.update(answers).set({ awardedPoints, updatedAt: new Date() }).where(and(eq(answers.submissionId, row.submission.id), eq(answers.questionId, questionId)));
+        await tx.insert(answers).values({ submissionId: row.submission.id, questionId, awardedPoints })
+          .onConflictDoUpdate({ target: [answers.submissionId, answers.questionId], set: { awardedPoints, updatedAt: new Date() } });
       }
-      const byQuestion = new Map(currentAnswers.map((answer) => [answer.questionId, answer]));
-      let score = 0;
-      for (const question of row.submission.questionSnapshot) {
-        if (question.type === "essay") {
-          const award = body.data.scores[question.id] ?? byQuestion.get(question.id)?.awardedPoints;
-          if (award === null || award === undefined) essayMissing = true;
-          else score += award;
-        } else score += byQuestion.get(question.id)?.awardedPoints ?? 0;
-      }
-      await tx.update(submissions).set({ score, gradingStatus: essayMissing ? "needs_review" : "graded" }).where(eq(submissions.id, row.submission.id));
+      const saved = await tx.select().from(answers).where(eq(answers.submissionId, row.submission.id));
+      const byQuestion = new Map(saved.map((answer) => [answer.questionId, answer.awardedPoints]));
+      const score = questions.reduce((total, question) => total + (byQuestion.get(question.id) ?? 0), 0);
+      const gradingStatus = [...essays.keys()].some((id) => byQuestion.get(id) == null) ? "needs_review" : "graded";
+      await tx.update(submissions).set({ score, gradingStatus }).where(eq(submissions.id, row.submission.id));
+      return { saved: true, score, gradingStatus };
     });
-    return { saved: true, gradingStatus: essayMissing ? "needs_review" : "graded" };
+    return result.error ? reply.code(result.error === "not_found" ? 404 : 400).send(result) : result;
   });
 
   app.delete("/teacher/results/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
@@ -133,7 +131,7 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
       studentClass: row.submission.studentClass,
       submittedAt: row.submission.submittedAt?.toISOString() ?? "",
       score: row.submission.score ?? "",
-      gradingStatus: english ? ({ pending: "Pending", needs_review: "Needs grading", graded: "Graded" }[row.submission.gradingStatus] ?? row.submission.gradingStatus) : row.submission.gradingStatus,
+      gradingStatus: english ? ({ pending: "Pending", needs_review: "Needs grading", graded: "Graded" }[row.submission.gradingStatus] ?? row.submission.gradingStatus) : { pending: "Chờ nộp", needs_review: "Cần chấm", graded: "Đã chấm" }[row.submission.gradingStatus],
       variantCode: row.variantCode,
       maxScore: row.submission.questionSnapshot.reduce((sum, question) => sum + question.points, 0),
     }));

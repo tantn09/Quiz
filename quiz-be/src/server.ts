@@ -11,6 +11,7 @@ import { studentRoutes } from "./routes/student.js";
 import { resultRoutes } from "./routes/results.js";
 import { assetRoutes, cleanupUnusedAssets } from "./routes/assets.js";
 import { quizImportRoutes } from "./routes/quiz-import.js";
+import { rosterRoutes } from "./routes/roster.js";
 import { catalogRoutes } from "./routes/catalogs.js";
 
 const app = Fastify({ logger: true, trustProxy: true });
@@ -26,6 +27,7 @@ await app.register(authRoutes);
 await app.register(teacherRoutes);
 await app.register(quizRoutes);
 await app.register(catalogRoutes);
+await app.register(rosterRoutes);
 await app.register(studentRoutes);
 await app.register(resultRoutes);
 await app.register(assetRoutes);
