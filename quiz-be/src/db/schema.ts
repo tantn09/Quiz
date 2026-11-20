@@ -38,6 +38,12 @@ export const gradeLevels = pgTable("grade_levels", {
   nameKey: varchar("name_key", { length: 120 }).notNull().unique(),
 });
 
+export const workplaces = pgTable("workplaces", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  nameKey: varchar("name_key", { length: 120 }).notNull().unique(),
+});
+
 export const quizzes = pgTable("quizzes", {
   id: uuid("id").defaultRandom().primaryKey(),
   teacherId: uuid("teacher_id").notNull().references(() => users.id),

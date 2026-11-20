@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTranslation } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
+import { TeacherCatalogFields } from "@/components/teacher-catalog-fields";
 import { Alert } from "@/components/ui/alert";
 
 export default function RegisterPage() {
@@ -23,6 +24,7 @@ export default function RegisterPage() {
       const response = await fetch("/api/auth/register", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: form.get("displayName"), username: form.get("username"), email: form.get("email"), subject: form.get("subject"), workplace: form.get("workplace"), password: form.get("password") }) });
       if (response.ok) { setDone(true); return; }
       const body = await response.json();
+      if (body.error === "invalid_catalog_selection") { setError(t("Bộ môn hoặc nơi công tác đã thay đổi. Hãy tải lại trang để chọn lại.")); return; }
       setError(response.status === 409 ? body.error === "email_exists" ? t("Email đã được sử dụng.") : t("Tên đăng nhập đã tồn tại.") : response.status === 429 ? t("Bạn thử lại sau ít phút.") : t("Không tạo được tài khoản. Hãy kiểm tra thông tin đã nhập."));
     } catch { setError(t("Không tạo được tài khoản. Hãy thử lại sau.")); }
     finally { setBusy(false); }
@@ -36,8 +38,7 @@ export default function RegisterPage() {
         <label className="text-sm font-medium sm:col-span-2">{t("Họ tên")}<Input name="displayName" required maxLength={160} autoComplete="name" className="mt-2" /></label>
         <label className="text-sm font-medium">{t("Tên đăng nhập")}<Input name="username" required minLength={3} maxLength={80} autoComplete="username" className="mt-2" /></label>
         <label className="text-sm font-medium">{t("Email")}<Input name="email" type="email" required maxLength={254} autoComplete="email" className="mt-2" /></label>
-        <label className="text-sm font-medium">{t("Bộ môn")}<Input name="subject" maxLength={120} className="mt-2" /></label>
-        <label className="text-sm font-medium">{t("Nơi công tác")}<Input name="workplace" maxLength={200} className="mt-2" /></label>
+        <TeacherCatalogFields registration />
         <label className="text-sm font-medium">{t("Mật khẩu")}<Input name="password" type="password" required minLength={10} maxLength={200} autoComplete="new-password" className="mt-2" /></label>
         <label className="text-sm font-medium">{t("Xác nhận mật khẩu mới")}<Input name="confirmPassword" type="password" required minLength={10} maxLength={200} autoComplete="new-password" className="mt-2" /></label>
         {error && <Alert tone="error" className="sm:col-span-2">{error}</Alert>}

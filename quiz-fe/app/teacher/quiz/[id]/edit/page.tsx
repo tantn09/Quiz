@@ -6,4 +6,4 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 
 import TeacherPage from "@/components/teacher-quiz-page";
 
-export default function QuizDetailPage() { return <TeacherPage mode="view" />; }
+export default function EditQuizPage() { return <TeacherPage mode="edit" admin={false} />; }

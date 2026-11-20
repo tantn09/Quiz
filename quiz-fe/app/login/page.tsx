@@ -32,7 +32,7 @@ export default function LoginPage() {
       applyLanguage(user.language);
       document.documentElement.dataset.theme = user.theme;
       document.documentElement.lang = user.language;
-      router.replace(user.role === "admin" ? "/admin" : "/teacher");
+      router.replace(user.role === "admin" ? "/admin" : "/teacher/quiz");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : t("Không thể đăng nhập lúc này."));
     } finally {

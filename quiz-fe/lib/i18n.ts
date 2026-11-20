@@ -365,6 +365,14 @@ const english: Record<string, string> = {
   "Không lưu được điểm. Hãy thử lại.": "Could not save the score. Try again.",
   "Nhập điểm theo bước 0.25 và trong giới hạn của câu.": "Enter a score in increments of 0.25 within the question limit.",
   "Lớp được giao": "Assigned class",
+  "Chọn bộ môn": "Select a subject",
+  "Chọn nơi công tác": "Select a workplace",
+  "Danh mục chưa có lựa chọn.": "No options available.",
+  "Quản lý danh mục": "Manage catalogs",
+  "Đang tải danh mục…": "Loading catalog options\u2026",
+  "Không tải được danh mục.": "Could not load catalog options.",
+  "Bộ môn hoặc nơi công tác đã thay đổi. Hãy mở lại biểu mẫu để chọn lại.": "The subject or workplace changed. Reopen the form to select again.",
+  "Bộ môn hoặc nơi công tác đã thay đổi. Hãy tải lại trang để chọn lại.": "The subject or workplace changed. Reload the page to select again.",
 };
 
 export function useLocale() {

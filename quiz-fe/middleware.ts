@@ -7,11 +7,29 @@ export async function middleware(request: NextRequest) {
     const response = await fetch(`${apiUrl}/auth/me`, { headers: { cookie }, cache: "no-store" });
     if (!response.ok) return NextResponse.redirect(new URL("/login", request.url));
     const { user } = await response.json();
-    if (request.nextUrl.pathname.startsWith("/admin") && user.role !== "admin") {
-      return NextResponse.redirect(new URL("/teacher", request.url));
+    if (user.role !== "admin" && user.role !== "teacher") return NextResponse.redirect(new URL("/login", request.url));
+
+    const pathname = request.nextUrl.pathname;
+    const quizPath = user.role === "admin" ? "/admin/quiz" : "/teacher/quiz";
+    const legacyQuizPath = "/teacher/quizzes";
+    const sharedPage = pathname.match(/^\/(admin|teacher)\/(students|results)$/);
+    let destination: string | undefined;
+
+    if (sharedPage && sharedPage[1] !== user.role) {
+      destination = `/${user.role}/${sharedPage[2]}`;
+    } else if (pathname === "/teacher") {
+      destination = quizPath;
+    } else if (pathname === legacyQuizPath || pathname.startsWith(legacyQuizPath + "/")) {
+      destination = quizPath + pathname.slice(legacyQuizPath.length);
+    } else if (user.role === "admin" && (pathname === "/teacher/quiz" || pathname.startsWith("/teacher/quiz/"))) {
+      destination = quizPath + pathname.slice("/teacher/quiz".length);
+    } else if (user.role === "teacher" && (pathname === "/admin" || pathname.startsWith("/admin/"))) {
+      destination = quizPath;
     }
-    if ((request.nextUrl.pathname.startsWith("/teacher") || request.nextUrl.pathname.startsWith("/settings")) && !["admin", "teacher"].includes(user.role)) {
-      return NextResponse.redirect(new URL("/login", request.url));
+    if (destination) {
+      const url = request.nextUrl.clone();
+      url.pathname = destination;
+      return NextResponse.redirect(url);
     }
     return NextResponse.next();
   } catch {

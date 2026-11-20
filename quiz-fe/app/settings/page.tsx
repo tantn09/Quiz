@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { applyLanguage, useTranslation } from "@/lib/i18n";
 import { PageHeader } from "@/components/ui/page-header";
+import { TeacherCatalogFields } from "@/components/teacher-catalog-fields";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/field";
@@ -47,6 +48,7 @@ export default function SettingsPage() {
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch("/api/auth/profile", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: form.get("displayName"), email: form.get("email"), subject: form.get("subject"), workplace: form.get("workplace") }) });
+      if (response.status === 400 && (await response.json().catch(() => ({}))).error === "invalid_catalog_selection") { setError(t("Bộ môn hoặc nơi công tác đã thay đổi. Hãy tải lại trang để chọn lại.")); return; }
       if (response.status === 409) { setError(t("Email đã được sử dụng.")); return; }
       if (!response.ok) { setError(t("Không lưu được thông tin tài khoản.")); return; }
       const { user } = await response.json();
@@ -78,8 +80,7 @@ export default function SettingsPage() {
       <form onSubmit={saveProfile} className="rounded-2xl border border-line bg-surface p-5 sm:p-6"><h2 className="text-lg font-bold">{t("Thông tin tài khoản")}</h2><p className="mt-1 text-sm text-content-muted">{t("Tên đăng nhập")}: {profile.username}</p><div className="mt-5 grid gap-4">
         <label className="text-sm font-medium">{t("Họ tên")}<Input name="displayName" defaultValue={profile.displayName} maxLength={160} required className="mt-2" /></label>
         <label className="text-sm font-medium">{t("Email")}<Input name="email" type="email" defaultValue={profile.email ?? ""} maxLength={254} autoComplete="email" className="mt-2" /></label>
-        <label className="text-sm font-medium">{t("Bộ môn")}<Input name="subject" defaultValue={profile.subject ?? ""} maxLength={120} className="mt-2" /></label>
-        <label className="text-sm font-medium">{t("Nơi công tác")}<Input name="workplace" defaultValue={profile.workplace ?? ""} maxLength={200} className="mt-2" /></label>
+        <TeacherCatalogFields subject={profile.subject} workplace={profile.workplace} />
         <Button disabled={busy} className="mt-1">{t("Lưu thông tin")}</Button>
       </div></form>
       <form onSubmit={changePassword} className="rounded-2xl border border-line bg-surface p-5 sm:p-6"><h2 className="text-lg font-bold">{t("Đổi mật khẩu")}</h2><p className="mt-1 text-sm text-content-muted">{t("Sau khi đổi mật khẩu, bạn cần đăng nhập lại.")}</p><div className="mt-5 grid gap-4">

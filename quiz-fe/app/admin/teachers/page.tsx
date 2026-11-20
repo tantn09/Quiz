@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { DashboardNav } from "@/components/dashboard-nav";
 import { Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
+import { TeacherCatalogFields } from "@/components/teacher-catalog-fields";
 import { Alert } from "@/components/ui/alert";
 import { PageHeader } from "@/components/ui/page-header";
 import { Select } from "@/components/ui/select";
@@ -43,6 +44,7 @@ export default function TeachersPage() {
       response = await fetch("/api/admin/teachers", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: form.get("username"), displayName: form.get("displayName"), email: form.get("email"), subject: form.get("subject"), workplace: form.get("workplace"), password: form.get("password") }) });
     } catch { setFormError(t("Không tạo được tài khoản. Hãy kiểm tra mật khẩu có ít nhất 10 ký tự.")); setBusy(false); return; }
     setBusy(false);
+    if (response.status === 400 && (await response.clone().json().catch(() => ({}))).error === "invalid_catalog_selection") { setFormError(t("Bộ môn hoặc nơi công tác đã thay đổi. Hãy mở lại biểu mẫu để chọn lại.")); return; }
     if (response.status === 409) { const body = await response.json(); setFormError(body.error === "email_exists" ? t("Email đã được sử dụng.") : t("Tên đăng nhập đã tồn tại.")); return; }
     if (!response.ok) { setFormError(t("Không tạo được tài khoản. Hãy kiểm tra mật khẩu có ít nhất 10 ký tự.")); return; }
     formElement.reset();
@@ -58,6 +60,7 @@ export default function TeachersPage() {
     const form = new FormData(event.currentTarget);
     try {
       const response = await fetch(`/api/admin/teachers/${editing.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ displayName: form.get("displayName"), email: form.get("email"), subject: form.get("subject"), workplace: form.get("workplace") }) });
+      if (response.status === 400 && (await response.clone().json().catch(() => ({}))).error === "invalid_catalog_selection") { setFormError(t("Bộ môn hoặc nơi công tác đã thay đổi. Hãy mở lại biểu mẫu để chọn lại.")); return; }
       if (!response.ok) { setFormError(response.status === 409 ? t("Email đã được sử dụng.") : t("Không lưu được thông tin tài khoản.")); return; }
       setEditing(null); setMessage(t("Đã cập nhật thông tin tài khoản.")); await load();
     } catch { setFormError(t("Không lưu được thông tin tài khoản.")); }
@@ -88,21 +91,21 @@ export default function TeachersPage() {
     <PageHeader title={t("Quản lý giáo viên")} description={t("Tạo tài khoản, tìm kiếm và quản lý quyền truy cập.")} action={<Button type="button" onClick={() => { setFormError(""); setFormOpen(true); }}>{t("Thêm giáo viên")}</Button>} />
     {message && <Alert className="mt-4">{message}</Alert>}
     {formOpen && <Modal title={t("Thêm giáo viên")} closeLabel={t("Đóng")} onClose={() => { if (!busy) { setFormOpen(false); setFormError(""); } }}><form onSubmit={create} className="grid gap-4">
-        {formError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{formError}</p>}
+
+      {formError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{formError}</p>}
         <label className="text-sm font-medium">{t("Họ tên giáo viên")}<input name="displayName" required className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
         <label className="text-sm font-medium">{t("Tên đăng nhập")}<input name="username" required minLength={3} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
         <label className="text-sm font-medium">{t("Email")}<input name="email" type="email" maxLength={254} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
-        <label className="text-sm font-medium">{t("Bộ môn")}<input name="subject" maxLength={120} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
-        <label className="text-sm font-medium">{t("Nơi công tác")}<input name="workplace" maxLength={200} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
+        <TeacherCatalogFields manageCatalogs />
         <label className="text-sm font-medium">{t("Mật khẩu tạm thời")}<input name="password" required minLength={10} type="password" className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
         <button disabled={busy} className="rounded-xl ds-gradient px-4 py-3 font-semibold text-white disabled:opacity-60">{busy ? t("Đang tạo…") : t("Tạo tài khoản")}</button>
       </form></Modal>}
     {editing && <Modal title={t("Sửa thông tin giáo viên")} closeLabel={t("Đóng")} onClose={() => { if (!busy) { setEditing(null); setFormError(""); } }}><form onSubmit={saveTeacher} className="grid gap-4">
+
       {formError && <p role="alert" className="rounded-xl ds-error p-3 text-sm">{formError}</p>}
       <label className="text-sm font-medium">{t("Họ tên")}<input name="displayName" defaultValue={editing.displayName} required maxLength={160} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
       <label className="text-sm font-medium">{t("Email")}<input name="email" type="email" defaultValue={editing.email ?? ""} maxLength={254} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
-      <label className="text-sm font-medium">{t("Bộ môn")}<input name="subject" defaultValue={editing.subject ?? ""} maxLength={120} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
-      <label className="text-sm font-medium">{t("Nơi công tác")}<input name="workplace" defaultValue={editing.workplace ?? ""} maxLength={200} className="mt-2 w-full rounded-xl border border-line px-4 py-3" /></label>
+      <TeacherCatalogFields manageCatalogs subject={editing.subject} workplace={editing.workplace} />
       <button disabled={busy} className="rounded-xl ds-gradient px-4 py-3 font-semibold text-white disabled:opacity-60">{t("Lưu thông tin")}</button>
     </form></Modal>}
     <section className="mt-7 rounded-2xl border border-line bg-surface p-5 sm:p-6">

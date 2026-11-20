@@ -8,7 +8,23 @@ import { useTranslation } from "@/lib/i18n";
 
 type DashboardNavProps = { admin?: boolean };
 
-export function DashboardNav({ admin = false }: DashboardNavProps) {
+export function DashboardNav({ admin: knownAdmin }: DashboardNavProps) {
+  const [sessionAdmin, setSessionAdmin] = useState<boolean>();
+  const admin = knownAdmin ?? sessionAdmin;
+
+  useEffect(() => {
+    if (knownAdmin !== undefined) return;
+    const controller = new AbortController();
+    fetch("/api/auth/me", { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const { user } = await response.json();
+        if (!controller.signal.aborted && (user.role === "admin" || user.role === "teacher")) setSessionAdmin(user.role === "admin");
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [knownAdmin]);
+
   const pathname = usePathname();
   const t = useTranslation();
   const [open, setOpen] = useState(false);
@@ -43,9 +59,11 @@ export function DashboardNav({ admin = false }: DashboardNavProps) {
     ...(admin ? [{ href: "/admin", label: t("Tổng quan"), icon: LayoutDashboard }] : []),
     ...(admin ? [{ href: "/admin/teachers", label: t("Giáo viên"), icon: Users }] : []),
     ...(admin ? [{ href: "/admin/catalogs", label: t("Danh mục"), icon: GraduationCap }] : []),
-    { href: "/teacher", label: t("Bài kiểm tra"), icon: BookOpenCheck },
-    { href: "/teacher/students", label: t("Học sinh"), icon: Users },
-    { href: "/teacher/results", label: t("Kết quả"), icon: BarChart3 },
+    ...(admin === undefined ? [] : [
+      { href: admin ? "/admin/quiz" : "/teacher/quiz", label: t("Bài kiểm tra"), icon: BookOpenCheck },
+      { href: admin ? "/admin/students" : "/teacher/students", label: t("Học sinh"), icon: Users },
+      { href: admin ? "/admin/results" : "/teacher/results", label: t("Kết quả"), icon: BarChart3 },
+    ]),
     { href: "/settings", label: t("Cài đặt"), icon: Settings },
   ];
 
@@ -72,17 +90,17 @@ export function DashboardNav({ admin = false }: DashboardNavProps) {
       className={`fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-line bg-surface px-4 py-5 shadow-xl backdrop-blur-xl transition-transform duration-200 ease-out sm:z-30 sm:w-64 sm:translate-x-0 sm:shadow-none ${open ? "translate-x-0" : "-translate-x-full"}`}
     >
       <div className="flex items-center justify-between px-2">
-        <Link href={admin ? "/admin" : "/teacher"} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
+        <Link href={admin ? "/admin" : "/teacher/quiz"} onClick={() => setOpen(false)} className="flex items-center gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl ds-gradient text-white"><GraduationCap size={22} aria-hidden="true" /></span>
           <span><span className="block text-sm font-bold tracking-wide text-content">CLASSROOM</span><span className="block text-xs text-content-muted">{t("Bài kiểm tra lớp học")}</span></span>
         </Link>
         <button type="button" onClick={() => setOpen(false)} aria-label={t("Đóng menu")} className="flex h-10 w-10 items-center justify-center rounded-lg text-content-muted hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:hidden"><X size={20} aria-hidden="true" /></button>
       </div>
 
-      <p className="mb-2 mt-9 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{admin ? t("Quản trị") : t("Giáo viên")}</p>
+      <p className="mb-2 mt-9 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{admin === undefined ? "" : t(admin ? "Quản trị" : "Giáo viên")}</p>
       <nav className="flex flex-col gap-1" aria-label={t("Điều hướng chính")}>
         {links.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || (href !== "/admin" && href !== "/teacher" && pathname.startsWith(`${href}/`));
+          const active = pathname === href || (href !== "/admin" && pathname.startsWith(`${href}/`));
           return <Link key={href} href={href} onClick={() => setOpen(false)} aria-current={active ? "page" : undefined} className={itemClass}>
             <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
             <span>{label}</span>

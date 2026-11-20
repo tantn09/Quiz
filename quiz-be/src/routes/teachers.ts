@@ -1,3 +1,4 @@
+import { invalidTeacherCatalogField } from "./catalogs.js";
 import type { FastifyInstance } from "fastify";
 import { and, eq, ilike, or } from "drizzle-orm";
 import { z } from "zod";
@@ -23,6 +24,8 @@ export async function teacherRoutes(app: FastifyInstance): Promise<void> {
   app.post("/admin/teachers", { preHandler: [requireAdmin] }, async (request, reply) => {
     const parsed = teacherInput.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
+    const field = await invalidTeacherCatalogField(parsed.data);
+    if (field) return reply.code(400).send({ error: "invalid_catalog_selection", field });
     let created;
     try {
       [created] = await db.insert(users).values({ username: parsed.data.username, displayName: parsed.data.displayName, email: parsed.data.email?.toLowerCase() || null, subject: parsed.data.subject || null, workplace: parsed.data.workplace || null, passwordHash: await hashPassword(parsed.data.password), role: "teacher" })
@@ -40,6 +43,12 @@ export async function teacherRoutes(app: FastifyInstance): Promise<void> {
     const body = editInput.safeParse(request.body);
     if (!params.success || !body.success || Object.keys(body.data).length === 0) return reply.code(400).send({ error: "invalid_request" });
     const { email, subject, workplace, ...rest } = body.data;
+    if (subject || workplace) {
+      const [current] = await db.select({ subject: users.subject, workplace: users.workplace }).from(users).where(and(eq(users.id, params.data.id), eq(users.role, "teacher")));
+      if (!current) return reply.code(404).send({ error: "not_found" });
+      const field = await invalidTeacherCatalogField({ subject, workplace }, current);
+      if (field) return reply.code(400).send({ error: "invalid_catalog_selection", field });
+    }
     let updated;
     try { [updated] = await db.update(users).set({ ...rest, ...(email !== undefined ? { email: email.toLowerCase() || null } : {}), ...(subject !== undefined ? { subject: subject || null } : {}), ...(workplace !== undefined ? { workplace: workplace || null } : {}), updatedAt: new Date() })
       .where(and(eq(users.id, params.data.id), eq(users.role, "teacher")))

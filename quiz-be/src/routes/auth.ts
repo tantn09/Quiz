@@ -1,3 +1,4 @@
+import { invalidTeacherCatalogField } from "./catalogs.js";
 import type { FastifyInstance } from "fastify";
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
@@ -14,6 +15,8 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.post("/auth/register", { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } }, async (request, reply) => {
     const parsed = registerBody.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
+    const field = await invalidTeacherCatalogField(parsed.data);
+    if (field) return reply.code(400).send({ error: "invalid_catalog_selection", field });
     try {
       await db.insert(users).values({ username: parsed.data.username, displayName: parsed.data.displayName, email: parsed.data.email.toLowerCase(), subject: parsed.data.subject || null, workplace: parsed.data.workplace || null, passwordHash: await hashPassword(parsed.data.password), role: "teacher", status: "pending" });
     } catch (error) {
@@ -46,6 +49,11 @@ export async function authRoutes(app: FastifyInstance): Promise<void> {
   app.patch("/auth/profile", { preHandler: [authenticate, requireUser] }, async (request, reply) => {
     const body = z.object({ displayName: z.string().trim().min(1).max(160), email: z.union([z.string().trim().email().max(254), z.literal("")]), subject: z.string().trim().max(120), workplace: z.string().trim().max(200) }).safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: "invalid_request" });
+    if (body.data.subject || body.data.workplace) {
+      const [current] = await db.select({ subject: users.subject, workplace: users.workplace }).from(users).where(eq(users.id, request.authUser!.id));
+      const field = await invalidTeacherCatalogField(body.data, current);
+      if (field) return reply.code(400).send({ error: "invalid_catalog_selection", field });
+    }
     const email = body.data.email.toLowerCase() || null;
     try {
       const [user] = await db.update(users).set({ displayName: body.data.displayName, email, subject: body.data.subject || null, workplace: body.data.workplace || null, updatedAt: new Date() }).where(eq(users.id, request.authUser!.id))

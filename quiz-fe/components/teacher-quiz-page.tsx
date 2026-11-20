@@ -107,7 +107,9 @@ function QuizActions({ quiz, t, copyLink, edit, openLinkExpiry, extendAttempts, 
   </div>;
 }
 
-export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create" | "view" | "edit" }) {
+export default function TeacherPage({ mode = "list", admin }: { admin: boolean; mode?: "list" | "create" | "view" | "edit" }) {
+  const quizPath = admin ? "/admin/quiz" : "/teacher/quiz";
+  const resultsPath = admin ? "/admin/results" : "/teacher/results";
   const router = useRouter();
   const params = useParams<{ id?: string }>();
   const [quizzes, setQuizzes] = useState<QuizRow[]>([]);
@@ -256,7 +258,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       const payload = await response.json() as { draft?: ImportDraft; errors?: ImportIssue[] };
       if (!response.ok || !payload.draft) { setImportErrors(payload.errors?.length ? payload.errors : [{ sheet: "File", row: 0, column: "file", message: t("Không đọc được file Excel.") }]); return; }
       const draft = payload.draft;
-      if (mode === "list") { sessionStorage.setItem("quiz-import-draft", JSON.stringify(draft)); router.push("/teacher/quizzes/new"); return; }
+      if (mode === "list") { sessionStorage.setItem("quiz-import-draft", JSON.stringify(draft)); router.push(quizPath + "/new"); return; }
       setSubject(""); setGradeLevel("");
       setTitle(draft.title); setDescription(draft.description); setPromptDocument(draft.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(draft.promptDocument?.content?.length)); setDuration(draft.durationMinutes);
       setExpiresAt(draft.linkExpiresAt ? new Date(new Date(draft.linkExpiresAt).getTime() - new Date(draft.linkExpiresAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
@@ -306,7 +308,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     if (!response.ok) { setFormError(t("Chưa lưu được bài kiểm tra. Kiểm tra câu trắc nghiệm có ít nhất hai lựa chọn và đáp án đúng hợp lệ.")); return; }
     const result = await response.json().catch(() => ({}));
     if (draftKey) localStorage.removeItem(draftKey);
-    if (mode !== "list") { router.push(`/teacher/quizzes/${editing ?? result.quiz?.id}`); return; }
+    if (mode !== "list") { router.push(`${quizPath}/${editing ?? result.quiz?.id}`); return; }
     setNotice(!editing && result.link ? `${t("Đã tạo bài kiểm tra. Link:")} ${window.location.origin}${result.link}` : t("Đã lưu bài kiểm tra."));
     clearForm();
     setFormOpen(false);
@@ -314,11 +316,11 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   }
 
   function clearForm() { setEditing(null); setTitle(""); setDescription(""); setPromptDocument(emptyPrompt); setPromptOpen(false); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setAssignedClass(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
-  function closeForm() { if (busy || importBusy) return; if (draftKey && draftReady && !draftCandidate) { try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions } satisfies SavedDraft)); } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); } } if (mode !== "list") { router.push(editing ? `/teacher/quizzes/${editing}` : "/teacher"); return; } setFormOpen(false); setFormError(""); setImportErrors([]); clearForm(); }
-  function newQuiz() { router.push("/teacher/quizzes/new"); }
+  function closeForm() { if (busy || importBusy) return; if (draftKey && draftReady && !draftCandidate) { try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions } satisfies SavedDraft)); } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); } } if (mode !== "list") { router.push(editing ? `${quizPath}/${editing}` : quizPath); return; } setFormOpen(false); setFormError(""); setImportErrors([]); clearForm(); }
+  function newQuiz() { router.push(quizPath + "/new"); }
 
   async function edit(quiz: QuizRow) {
-    if (mode === "list" || mode === "view") { router.push(`/teacher/quizzes/${quiz.id}/edit`); return; }
+    if (mode === "list" || mode === "view") { router.push(`${quizPath}/${quiz.id}/edit`); return; }
     const response = await fetch(`/api/teacher/quizzes/${quiz.id}`);
     if (!response.ok) { setNotice(t("Không tải được bài kiểm tra để sửa.")); return; }
     const result = await response.json();
@@ -330,7 +332,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
   }
 
   async function openDetail(quiz: QuizRow) {
-    if (mode === "list") { router.push(`/teacher/quizzes/${quiz.id}`); return; }
+    if (mode === "list") { router.push(`${quizPath}/${quiz.id}`); return; }
     setDetailTab("overview");
     setContentVariantId("");
     setDetailQuiz(quiz); setDetail(null); setDetailError("");
@@ -359,7 +361,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
     if (!window.confirm(`${t("Xóa bài kiểm tra này khỏi danh sách?")} ${quiz.title}`)) return;
     const response = await fetch(`/api/teacher/quizzes/${quiz.id}`, { method: "DELETE" });
     setNotice(response.ok ? t("Đã xóa bài kiểm tra khỏi danh sách. Kết quả đã nộp vẫn được giữ lại.") : t("Không xóa được bài kiểm tra."));
-    if (response.ok) { await load(); if (mode === "view") router.push("/teacher"); else setDetailQuiz(null); }
+    if (response.ok) { await load(); if (mode === "view") router.push(quizPath); else setDetailQuiz(null); }
   }
 
   function openLinkExpiry(quiz: QuizRow) {
@@ -425,9 +427,9 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
 
   const contentVariant = detail?.variants?.find((variant) => variant.id === contentVariantId) ?? detail?.variants?.[0];
   const contentQuestions = contentVariant?.questions ?? detail?.questions ?? [];
-  return <><DashboardNav /><main id="page-content" tabIndex={-1} className="min-h-screen px-4 pb-8 pt-20 sm:ml-64 sm:px-8 sm:pt-8"><div className="mx-auto max-w-6xl">
-    {mode === "list" && <PageHeader eyebrow={t("GIÁO VIÊN")} title={t("bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Excel")}</Button><Button asChild variant="outline"><a href="/api/teacher/quizzes/import-template.xlsx" download>{t("Tải file mẫu")}</a></Button><Button asChild variant="outline"><Link href="/teacher/results">{t("Xem kết quả")}</Link></Button></div>} />}
-    {mode !== "list" && <PageHeader eyebrow={t("GIÁO VIÊN")} title={mode === "create" ? t("Tạo bài kiểm tra mới") : mode === "edit" ? t("Sửa bài kiểm tra") : t("Chi tiết bài kiểm tra")} description={mode === "create" ? t("Điền thông tin, thêm câu hỏi rồi tạo bài kiểm tra.") : undefined} action={<Button asChild variant="outline"><Link href="/teacher">{t("Về danh sách bài kiểm tra")}</Link></Button>} />}
+  return <><DashboardNav admin={admin} /><main id="page-content" tabIndex={-1} className="min-h-screen px-4 pb-8 pt-20 sm:ml-64 sm:px-8 sm:pt-8"><div className="mx-auto max-w-6xl">
+    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Excel")}</Button><Button asChild variant="outline"><a href="/api/teacher/quizzes/import-template.xlsx" download>{t("Tải file mẫu")}</a></Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
+    {mode !== "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={mode === "create" ? t("Tạo bài kiểm tra mới") : mode === "edit" ? t("Sửa bài kiểm tra") : t("Chi tiết bài kiểm tra")} description={mode === "create" ? t("Điền thông tin, thêm câu hỏi rồi tạo bài kiểm tra.") : undefined} action={<Button asChild variant="outline"><Link href={quizPath}>{t("Về danh sách bài kiểm tra")}</Link></Button>} />}
     <input ref={importInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importExcel(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
     {mode === "list" && importErrors.length > 0 && <div role="alert" className="mt-5 rounded-xl ds-error p-4 text-sm"><p className="font-semibold">{t("File Excel có lỗi:")}</p><ul className="mt-2 list-disc pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t("dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}
     {notice && <Alert className="mt-5 break-words">{notice}</Alert>}
@@ -436,7 +438,7 @@ export default function TeacherPage({ mode = "list" }: { mode?: "list" | "create
       {!detail && !detailError && <p role="status" className="py-8 text-center text-content-muted">{t("Đang tải chi tiết…")}</p>}
       {detailError && <div role="alert" className="rounded-xl ds-error p-4 text-sm">{detailError}<Button type="button" variant="outline" className="mt-3" onClick={() => { if (params.id) window.location.reload(); else if (detailQuiz) void openDetail(detailQuiz); }}>{t("Thử lại")}</Button></div>}
       {detail && <div className="space-y-6">
-        <header className="rounded-2xl border border-line bg-surface-subtle p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><h2 className="text-2xl font-bold">{detail.quiz.title}</h2><p className="mt-2 text-sm text-content-muted">{detail.quiz.assignedClass ? `Lớp ${detail.quiz.assignedClass} · ` : ""}{detail.quiz.subject ? `${detail.quiz.subject} · ` : ""}{detail.quiz.durationMinutes} phút</p><p className="mt-2 text-sm font-semibold">{detail.quiz.status === "active" ? detail.quiz.linkExpiresAt && new Date(detail.quiz.linkExpiresAt) <= new Date() ? "Link đã hết hạn" : "Đang mở" : "Đã đóng"} · {detail.quiz.linkExpiresAt ? `Hạn link ${formatTimeFirst(detail.quiz.linkExpiresAt)}` : "Link không có hạn"}</p></div><div className="flex w-full flex-wrap gap-2 sm:w-auto">{detail.quiz.status === "active" && (!detail.quiz.linkExpiresAt || new Date(detail.quiz.linkExpiresAt) > new Date()) ? <Button type="button" onClick={() => void copyLink(detail.quiz)}>Sao chép link</Button> : <Button type="button" onClick={() => openLinkExpiry(detail.quiz)}>{detail.quiz.status === "inactive" ? "Mở lại bài kiểm tra" : "Gia hạn link"}</Button>}<Button asChild variant="outline"><Link href={`/teacher/results?quizId=${detail.quiz.id}${detail.quiz.assignedClass ? `&className=${encodeURIComponent(detail.quiz.assignedClass)}` : ""}`}>Xem kết quả</Link></Button><Button type="button" variant="outline" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>Sửa bài kiểm tra</Button><QuizActions quiz={detail.quiz} t={t} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts} stop={stop} deleteQuiz={deleteQuiz} cloneQuiz={(quiz) => { setCloneSource(quiz); setCloneClass(""); }} /></div></div></header>
+        <header className="rounded-2xl border border-line bg-surface-subtle p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><h2 className="text-2xl font-bold">{detail.quiz.title}</h2><p className="mt-2 text-sm text-content-muted">{detail.quiz.assignedClass ? `Lớp ${detail.quiz.assignedClass} · ` : ""}{detail.quiz.subject ? `${detail.quiz.subject} · ` : ""}{detail.quiz.durationMinutes} phút</p><p className="mt-2 text-sm font-semibold">{detail.quiz.status === "active" ? detail.quiz.linkExpiresAt && new Date(detail.quiz.linkExpiresAt) <= new Date() ? "Link đã hết hạn" : "Đang mở" : "Đã đóng"} · {detail.quiz.linkExpiresAt ? `Hạn link ${formatTimeFirst(detail.quiz.linkExpiresAt)}` : "Link không có hạn"}</p></div><div className="flex w-full flex-wrap gap-2 sm:w-auto">{detail.quiz.status === "active" && (!detail.quiz.linkExpiresAt || new Date(detail.quiz.linkExpiresAt) > new Date()) ? <Button type="button" onClick={() => void copyLink(detail.quiz)}>Sao chép link</Button> : <Button type="button" onClick={() => openLinkExpiry(detail.quiz)}>{detail.quiz.status === "inactive" ? "Mở lại bài kiểm tra" : "Gia hạn link"}</Button>}<Button asChild variant="outline"><Link href={`${resultsPath}?quizId=${detail.quiz.id}${detail.quiz.assignedClass ? `&className=${encodeURIComponent(detail.quiz.assignedClass)}` : ""}`}>Xem kết quả</Link></Button><Button type="button" variant="outline" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>Sửa bài kiểm tra</Button><QuizActions quiz={detail.quiz} t={t} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts} stop={stop} deleteQuiz={deleteQuiz} cloneQuiz={(quiz) => { setCloneSource(quiz); setCloneClass(""); }} /></div></div></header>
         <div role="tablist" aria-label="Nội dung chi tiết bài kiểm tra" className="flex gap-2 overflow-x-auto border-b border-line pb-3"><button type="button" role="tab" aria-selected={detailTab === "overview"} onClick={() => setDetailTab("overview")} className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-focus ${detailTab === "overview" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Tổng quan</button><button type="button" role="tab" aria-selected={detailTab === "content"} onClick={() => void showContent()} className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-focus ${detailTab === "content" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Nội dung</button><button type="button" role="tab" aria-selected={detailTab === "variants"} onClick={() => setDetailTab("variants")} className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-focus ${detailTab === "variants" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Mã đề</button></div>
         {detailTab === "overview" && <div role="tabpanel" className="space-y-6">
         <div><h3 className="text-xl font-bold">{detail.quiz.title}</h3><p className="mt-2 whitespace-pre-wrap text-sm text-content-muted">{detail.quiz.description || t("Chưa có mô tả.")}</p></div>
