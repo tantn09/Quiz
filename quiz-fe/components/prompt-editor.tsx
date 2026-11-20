@@ -1,5 +1,6 @@
 "use client";
 
+import { useErrorToast } from "@/components/ui/toast";
 import { useEffect, useRef, useState } from "react";
 import { useEditor, type JSONContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
@@ -26,6 +27,7 @@ export function promptImages(document: PromptDocument): string[] {
 const extensions = [StarterKit, Image, Link.configure({ openOnClick: false }), TextAlign.configure({ types: ["heading", "paragraph"] }), TableKit, TextStyle, Color, Underline];
 
 export function PromptEditor({ value, onChange }: { value: PromptDocument; onChange: (value: PromptDocument) => void }) {
+  const showError = useErrorToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [alt, setAlt] = useState("");
@@ -59,7 +61,7 @@ export function PromptEditor({ value, onChange }: { value: PromptDocument; onCha
       const { id } = await response.json();
       editor?.chain().focus().setImage({ src: `/api/public/assets/${id}`, alt: alt.trim() }).run();
       setPendingFile(null);
-    } catch { setError("Không tải được ảnh. Vui lòng thử lại."); } finally { setBusy(false); }
+    } catch { showError("Không tải được ảnh. Vui lòng thử lại."); } finally { setBusy(false); }
   }
 
   function saveLink() {

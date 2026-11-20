@@ -1,123 +1,165 @@
 ﻿"use client";
 
-import { useEffect, useState, type FormEvent } from "react";
-import { DashboardNav } from "@/components/dashboard-nav";
+import { LoadingScreen } from "@/components/ui/loading-screen";
+import { useErrorToast } from "@/components/ui/toast";
+import { Input } from "@/components/ui/field";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { StudentForm, StudentImport, type Student } from "@/features/students/student-forms";
+import { DashboardLayout } from "@/components/page-layouts";
+import { Alert } from "@/components/ui/alert";
+import { Select } from "@/components/ui/select";
+import { Table } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/ui/page-header";
 import { Modal } from "@/components/modal";
 import { useTranslation } from "@/lib/i18n";
 
-type Student = { id: string; name: string; className: string };
-type Upload = { filename: string; data: string };
 const blank = { id: "", name: "", className: "" };
 const endpoint = "/api/teacher/students";
+type Teacher = { id: string; displayName: string; username: string };
 
 export default function StudentsPage({ admin }: { admin: boolean }) {
   const t = useTranslation();
+  const showError = useErrorToast();
+  const searchRef = useRef<HTMLInputElement>(null);
+  const [teachersLoading, setTeachersLoading] = useState(admin);
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teacherId, setTeacherId] = useState("");
   const [students, setStudents] = useState<Student[]>([]);
   const [draft, setDraft] = useState<Student | null>(null);
   const [remove, setRemove] = useState<Student | null>(null);
   const [search, setSearch] = useState("");
   const [className, setClassName] = useState("");
-  const [upload, setUpload] = useState<Upload | null>(null);
-  const [count, setCount] = useState(0);
-  const [errors, setErrors] = useState<{ row: number; message: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  const [importOpen, setImportOpen] = useState(false);
+  const [loadState, setLoadState] = useState<"loading" | "ready" | "error">(admin ? "ready" : "loading");
 
-  async function load() {
-    const response = await fetch(endpoint, { cache: "no-store" });
-    if (!response.ok) throw new Error();
-    setStudents((await response.json()).students);
+  const teacher = teachers.find((item) => item.id === teacherId);
+  const suffix = admin && teacherId ? "?teacherId=" + encodeURIComponent(teacherId) : "";
+  const canManage = !admin || Boolean(teacher);
+  const teacherName = teacher?.displayName;
+
+  async function load(signal?: AbortSignal) {
+    try {
+      const response = await fetch(endpoint + suffix, { cache: "no-store", signal });
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      if (!signal?.aborted) { setStudents(data.students); setLoadState("ready"); }
+    } catch {
+      if (signal?.aborted) return;
+      setLoadState("error");
+      showError(t("Không tải được danh sách học sinh."));
+    }
   }
 
-  useEffect(() => { void load().catch(() => setNotice("Không tải được danh sách học sinh.")); }, []);
+  useEffect(() => {
+    if (!admin) return;
+    const controller = new AbortController();
+    fetch("/api/admin/teachers", { cache: "no-store", signal: controller.signal }).then(async (response) => {
+      if (!response.ok) throw new Error();
+      const data = await response.json();
+      if (!controller.signal.aborted) setTeachers(data.teachers);
+    }).catch(() => {
+      if (!controller.signal.aborted) showError(t("Không tải được danh sách giáo viên."));
+    }).finally(() => { if (!controller.signal.aborted) setTeachersLoading(false); });
+    return () => controller.abort();
+  }, [admin, showError, t]);
+
+  useEffect(() => {
+    if (admin && !teacherId) return;
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [admin, teacherId]);
 
   async function save(event?: FormEvent) {
     event?.preventDefault();
-    if (!draft && !remove) return;
+    if (!canManage || busy || (!draft && !remove)) return;
     setBusy(true);
     try {
       const id = remove?.id ?? draft?.id;
-      const response = await fetch(id ? endpoint + "/" + id : endpoint, {
+      const response = await fetch(endpoint + (id ? "/" + id : "") + suffix, {
         method: remove ? "DELETE" : id ? "PUT" : "POST",
         headers: draft && !remove ? { "content-type": "application/json" } : undefined,
         body: draft && !remove ? JSON.stringify({ name: draft.name, className: draft.className }) : undefined,
       });
-      if (response.status === 409) { setNotice("Họ tên bị trùng trong lớp."); return; }
+      if (response.status === 409) { showError(t("Họ tên bị trùng trong lớp.")); return; }
       if (!response.ok) throw new Error();
+      setNotice(t("Đã cập nhật danh sách học sinh."));
+      await load();
       setDraft(null);
       setRemove(null);
-      setNotice("Đã cập nhật danh sách học sinh.");
-      await load();
-    } catch { setNotice("Không cập nhật được danh sách học sinh."); }
+      if (remove) requestAnimationFrame(() => searchRef.current?.focus());
+    } catch { showError(t("Không cập nhật được danh sách học sinh.")); }
     finally { setBusy(false); }
-  }
-
-  async function importFile(file: Upload, confirm: boolean) {
-    setBusy(true);
-    setCount(0);
-    setErrors([]);
-    try {
-      const response = await fetch(endpoint + "/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...file, confirm }) });
-      const result = await response.json();
-      if (!response.ok && !result.errors) throw new Error();
-      setCount(result.count ?? 0);
-      setErrors(result.errors ?? []);
-      if (response.ok && confirm) {
-        setUpload(null);
-        setNotice("Đã nhập danh sách học sinh.");
-        await load();
-      }
-    } catch { setErrors([{ row: 0, message: "Không nhập được danh sách học sinh." }]); }
-    finally { setBusy(false); }
-  }
-
-  async function selectFile(file?: File) {
-    setUpload(null);
-    setCount(0);
-    setErrors([]);
-    if (!file) return;
-    if (file.size > 2_000_000 || !file.name.toLowerCase().endsWith(".xlsx")) {
-      setErrors([{ row: 0, message: "Chỉ nhận file .xlsx hợp lệ tối đa 2 MB." }]);
-      return;
-    }
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    let binary = "";
-    for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-    const data = { filename: file.name, data: btoa(binary) };
-    setUpload(data);
-    await importFile(data, false);
   }
 
   const classes = [...new Set(students.map((item) => item.className))];
-  const visible = students.filter((item) => (!className || item.className === className) && item.name.toLocaleLowerCase("vi").includes(search.trim().toLocaleLowerCase("vi")));
+  const activeClass = classes.includes(className) ? className : "";
+  const visible = students.filter((item) => (!activeClass || item.className === activeClass) && item.name.toLocaleLowerCase("vi").includes(search.trim().toLocaleLowerCase("vi")));
 
-  return <><DashboardNav admin={admin} /><main id="page-content" tabIndex={-1} className="mx-auto min-h-screen px-4 pb-8 pt-20 sm:ml-64 sm:px-8 sm:pt-8">
-    <PageHeader title={t("Học sinh")} />
-    {notice && <p role="status" className="my-4">{t(notice)}</p>}
-    <section className="my-5 space-y-4 rounded-xl border border-line bg-surface p-4">
-      <div className="flex flex-wrap gap-3">
-        <Button onClick={() => { setNotice(""); setDraft(blank); }}>{t("Thêm học sinh")}</Button>
-        <Button asChild variant="outline"><a href={endpoint + "/template.xlsx"}>{t("Tải Excel mẫu")}</a></Button>
-        <label className="flex flex-wrap items-center gap-3">{t("Nhập Excel")}<input disabled={busy} type="file" accept=".xlsx" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; void selectFile(file).catch(() => setErrors([{ row: 0, message: "Không đọc được file .xlsx." }])); }} /></label>
+  function openStudent(student: Student) {
+    setDraft(student);
+  }
+
+  if (teachersLoading || loadState === "loading") return <LoadingScreen />;
+
+  return <DashboardLayout admin={admin}>
+    <PageHeader title={t("Quản lý học sinh")} description={t("Tìm kiếm, quản lý danh sách lớp và nhập học sinh từ Excel.")} action={
+      <div className="flex flex-wrap gap-2">
+        <Button type="button" disabled={busy || !canManage} onClick={() => openStudent({ ...blank, className: activeClass })}>{t("Thêm học sinh")}</Button>
+        <Button type="button" variant="outline" disabled={busy || !canManage} onClick={() => setImportOpen(true)}>{t("Nhập Excel")}</Button>
       </div>
-      {!!errors.length && <ul role="alert" className="list-disc space-y-1 pl-5">{errors.map((error) => <li key={error.row}>{error.row ? t("Dòng") + " " + error.row + " · " : ""}{t(error.message)}</li>)}</ul>}
-      {upload && count > 0 && <div className="flex flex-wrap items-center gap-3"><p role="status">{t("Số dòng hợp lệ")} {count}</p>{!errors.length && <Button disabled={busy} onClick={() => void importFile(upload, true)}>{t("Xác nhận nhập")}</Button>}</div>}
+    } />
+    {notice && <Alert tone="success" className="mt-4">{notice}</Alert>}
+    <section className="mt-7 min-w-0 rounded-2xl border border-line bg-surface p-5 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row">
+        {admin && <Select value={teacherId} onValueChange={(id) => {
+          setTeacherId(id); setClassName(""); setStudents([]); setNotice("");
+          setLoadState(id ? "loading" : "ready");
+        }} disabled={busy} ariaLabel={t("Giáo viên")} options={[{ value: "", label: t("Chọn giáo viên") }, ...teachers.map((item) => ({ value: item.id, label: item.displayName + " · " + item.username }))]} className="sm:w-56" />}
+        {canManage && <>
+        <Input ref={searchRef} type="search" aria-label={t("Tìm theo họ tên")} placeholder={t("Tìm theo họ tên")} className="min-w-0 flex-1 rounded-xl px-4 py-3" value={search} onChange={(event) => setSearch(event.target.value)} />
+        <Select value={activeClass} onValueChange={setClassName} ariaLabel={t("Lớp")} options={[{ value: "", label: t("Tất cả lớp") }, ...classes.map((item) => ({ value: item, label: item }))]} className="sm:w-56" />
+        </>}
+      </div>
+      {!canManage && <p className="mt-5 text-sm text-content-muted">{t(teachers.length ? "Chọn giáo viên để quản lý danh sách theo lớp." : "Chưa có giáo viên để chọn.")}</p>}
+      {canManage && loadState === "ready" && <div className="mt-5">
+        <Table>
+          <thead><tr>
+            <th scope="col">{t("Họ và tên")}</th>
+            <th scope="col">{t("Lớp")}</th>
+            <th scope="col" className="w-px">{t("Thao tác")}</th>
+          </tr></thead>
+          <tbody>
+            {visible.map((item) => <tr key={item.id} className="border-b border-line last:border-b-0">
+              <th scope="row" className="break-words py-4 text-left font-medium [overflow-wrap:anywhere]">{item.name}</th>
+              <td className="py-4 [overflow-wrap:anywhere]">{item.className}</td>
+              <td className="py-4"><div className="flex flex-col items-start gap-2 sm:flex-row">
+                <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={t("Sửa") + " " + item.name} onClick={() => openStudent(item)}>{t("Sửa")}</Button>
+                <Button type="button" variant="outline" size="sm" disabled={busy} aria-label={t("Xóa") + " " + item.name} onClick={() => { setRemove(item); }}>{t("Xóa")}</Button>
+              </div></td>
+            </tr>)}
+            {!visible.length && <tr><td colSpan={3} className="py-10 text-center text-content-muted" role="status">
+              {t(students.length ? "Không tìm thấy học sinh phù hợp." : "Chưa có học sinh.")}
+            </td></tr>}
+          </tbody>
+        </Table>
+      </div>}
     </section>
-    <div className="flex flex-wrap gap-4">
-      <label>{t("Tìm theo họ tên")}<input className="ml-2 rounded border border-line bg-surface p-2" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-      <label>{t("Lớp")}<select className="ml-2 rounded border border-line bg-surface p-2" value={className} onChange={(event) => setClassName(event.target.value)}><option value="">{t("Tất cả lớp")}</option>{classes.map((item) => <option key={item}>{item}</option>)}</select></label>
-    </div>
-    <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-surface px-4">
-      {visible.map((item) => <li key={item.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><span>{item.name} · {item.className}</span><div className="flex gap-2"><Button variant="outline" onClick={() => { setNotice(""); setDraft(item); }}>{t("Sửa")}</Button><Button variant="outline" onClick={() => { setNotice(""); setRemove(item); }}>{t("Xóa")}</Button></div></li>)}
-      {!visible.length && <li className="py-4">{t("Chưa có học sinh.")}</li>}
-    </ul>
-    {draft && <Modal title={t(draft.id ? "Sửa học sinh" : "Thêm học sinh")} onClose={() => !busy && setDraft(null)}><form onSubmit={save} className="space-y-4">
-      <label className="block">{t("Họ và tên")}<input required maxLength={160} className="mt-1 block w-full rounded border border-line bg-surface p-2" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-      <label className="block">{t("Lớp")}<input required maxLength={80} className="mt-1 block w-full rounded border border-line bg-surface p-2" value={draft.className} onChange={(event) => setDraft({ ...draft, className: event.target.value })} /></label>
-      {notice && <p role="alert">{t(notice)}</p>}<Button disabled={busy}>{t("Lưu")}</Button>
-    </form></Modal>}
-    {remove && <Modal title={t("Xóa khỏi danh sách lớp")} onClose={() => !busy && setRemove(null)}><p>{remove.name} · {remove.className}</p>{notice && <p role="alert">{t(notice)}</p>}<Button className="mt-4" disabled={busy} onClick={() => void save()}>{t("Xác nhận xóa")}</Button></Modal>}
-  </main></>;
+    {draft && <StudentForm teacherName={teacherName} draft={draft} setDraft={setDraft} save={save} close={() => setDraft(null)} busy={busy} />}
+    {remove && <Modal title={t("Xóa khỏi danh sách lớp")} closeLabel={t("Đóng")} onClose={() => !busy && setRemove(null)}>
+      <p className="font-medium">{remove.name}</p><p className="mt-1 text-sm text-content-muted">{t("Lớp")} {remove.className}</p>
+      <div className="mt-5 flex flex-wrap justify-end gap-2">
+        <Button type="button" variant="outline" disabled={busy} onClick={() => setRemove(null)}>{t("Hủy")}</Button>
+        <Button type="button" variant="destructive" disabled={busy} onClick={() => void save()}>{t("Xóa học sinh")}</Button>
+      </div>
+    </Modal>}
+    {importOpen && <StudentImport endpoint={endpoint} suffix={suffix} teacherName={teacherName} busy={busy} setBusy={setBusy} close={() => setImportOpen(false)} onImported={async (count) => {
+      setNotice(t("Đã nhập {count} học sinh.").replace("{count}", String(count)));
+      await load();
+      setImportOpen(false);
+    }} />}
+  </DashboardLayout>;
 }

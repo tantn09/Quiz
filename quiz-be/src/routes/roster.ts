@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import ExcelJS from "exceljs";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, ne } from "drizzle-orm";
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
-import { accessRequests, quizzes, students, submissions } from "../db/schema.js";
+import { accessRequests, quizzes, students, submissions, users } from "../db/schema.js";
 
 const clean = (value: string) => value.normalize("NFKC").trim().replace(/\s+/g, " ");
 export const identityKey = (value: string) => clean(value).toLocaleLowerCase("vi");
@@ -19,16 +19,34 @@ const identity = (teacherId: string, input: z.infer<typeof studentInput>) => ({ 
 const owner = (user: { role: string; id: string }) => user.role === "admin" ? undefined : eq(quizzes.teacherId, user.id);
 const rosterFields = { id: students.id, name: students.name, className: students.className, nameKey: students.nameKey };
 
+const rosterQuery = z.object({ teacherId: z.string().uuid().optional() });
+
+async function resolveRosterOwner(request: FastifyRequest, reply: FastifyReply) {
+  const query = rosterQuery.safeParse(request.query);
+  if (!query.success) { reply.code(400).send({ error: "invalid_request" }); return; }
+  const user = request.authUser!;
+  const teacherId = query.data.teacherId;
+  if (!teacherId || teacherId === user.id) return user.id;
+  if (user.role !== "admin") { reply.code(403).send({ error: "forbidden" }); return; }
+  const [teacher] = await db.select({ id: users.id }).from(users).where(and(eq(users.id, teacherId), eq(users.role, "teacher")));
+  if (!teacher) { reply.code(404).send({ error: "teacher_not_found" }); return; }
+  return teacher.id;
+}
+
 export async function rosterRoutes(app: FastifyInstance) {
   const protectedRoute = { preHandler: [requireTeacherAccess] };
-  app.get("/teacher/students", protectedRoute, async (request) => ({
-    students: await db.select(rosterFields).from(students).where(and(eq(students.teacherId, request.authUser!.id), eq(students.deleted, false))).orderBy(students.className, students.name),
-  }));
+  app.get("/teacher/students", protectedRoute, async (request, reply) => {
+    const teacherId = await resolveRosterOwner(request, reply);
+    if (!teacherId) return;
+    return { students: await db.select(rosterFields).from(students).where(and(eq(students.teacherId, teacherId), eq(students.deleted, false))).orderBy(students.className, students.name) };
+  });
 
   app.post("/teacher/students", protectedRoute, async (request, reply) => {
     const body = studentInput.safeParse(request.body);
     if (!body.success) return reply.code(400).send({ error: "invalid_request" });
-    const [student] = await db.insert(students).values(identity(request.authUser!.id, body.data)).onConflictDoUpdate({
+    const teacherId = await resolveRosterOwner(request, reply);
+    if (!teacherId) return;
+    const [student] = await db.insert(students).values(identity(teacherId, body.data)).onConflictDoUpdate({
       target: [students.teacherId, students.classKey, students.nameKey],
       set: { ...body.data, deleted: false }, setWhere: eq(students.deleted, true),
     }).returning(rosterFields);
@@ -39,7 +57,8 @@ export async function rosterRoutes(app: FastifyInstance) {
     const params = idInput.safeParse(request.params);
     const body = studentInput.safeParse(request.body);
     if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
-    const teacherId = request.authUser!.id;
+    const teacherId = await resolveRosterOwner(request, reply);
+    if (!teacherId) return;
     try {
       const [student] = await db.update(students).set(identity(teacherId, body.data)).where(and(eq(students.id, params.data.id), eq(students.teacherId, teacherId), eq(students.deleted, false))).returning(rosterFields);
       return student ? { student } : reply.code(404).send({ error: "not_found" });
@@ -52,7 +71,9 @@ export async function rosterRoutes(app: FastifyInstance) {
   app.delete("/teacher/students/:id", protectedRoute, async (request, reply) => {
     const params = idInput.safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
-    const [student] = await db.update(students).set({ deleted: true }).where(and(eq(students.id, params.data.id), eq(students.teacherId, request.authUser!.id), eq(students.deleted, false))).returning({ id: students.id });
+    const teacherId = await resolveRosterOwner(request, reply);
+    if (!teacherId) return;
+    const [student] = await db.update(students).set({ deleted: true }).where(and(eq(students.id, params.data.id), eq(students.teacherId, teacherId), eq(students.deleted, false))).returning({ id: students.id });
     return reply.code(student ? 204 : 404).send();
   });
 
@@ -68,6 +89,8 @@ export async function rosterRoutes(app: FastifyInstance) {
   });
 
   app.post("/teacher/students/import", { ...protectedRoute, bodyLimit: 3_000_000 }, async (request, reply) => {
+    const teacherId = await resolveRosterOwner(request, reply);
+    if (!teacherId) return;
     const body = upload.safeParse(request.body);
     const bytes = body.success ? Buffer.from(body.data.data, "base64") : Buffer.alloc(0);
     const invalid = () => reply.code(400).send({ errors: [{ row: 0, message: "Chỉ nhận file .xlsx hợp lệ tối đa 2 MB." }] });
@@ -78,7 +101,6 @@ export async function rosterRoutes(app: FastifyInstance) {
     if (!sheet || headers.some((header, i) => sheet.getRow(1).getCell(i + 1).text !== header) || sheet.rowCount > 5001) {
       return reply.code(400).send({ errors: [{ row: 1, message: "Dùng đúng file mẫu và tối đa 5.000 dòng học sinh." }] });
     }
-    const teacherId = request.authUser!.id;
     const existing = await db.select().from(students).where(and(eq(students.teacherId, teacherId), eq(students.deleted, false)));
     const seen = new Set(existing.map((student) => JSON.stringify([student.classKey, student.nameKey])));
     const errors: { row: number; message: string }[] = [];

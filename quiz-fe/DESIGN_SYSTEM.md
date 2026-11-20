@@ -26,3 +26,20 @@ Class `ds-gradient` dùng cho nút chính; `ds-gradient-soft` dùng cho hero. `d
 | `Modal` | Form tạo/sửa; quản lý focus, Escape và khóa cuộn nền. |
 
 Các component nằm trong `components/ui`, riêng `Modal` ở `components/modal.tsx`. Ưu tiên dùng component và token ngữ nghĩa trước khi thêm màu trực tiếp vào trang. Kiểm tra ở 375, 768, 1024 và 1440 px, theme sáng/tối, tiếng Việt/Anh và điều hướng bàn phím.
+
+
+## Layout và phạm vi áp dụng
+
+| Route | Layout và component |
+| --- | --- |
+| `/` | Bố cục giới thiệu, token nhận diện và Button dùng chung |
+| `/login`, `/register` | AuthLayout, form, Button và Alert |
+| `/admin`, `/admin/teachers`, `/admin/catalogs`, `/settings` | DashboardLayout, PageHeader và component form/bảng |
+| `/admin/quiz`, `/teacher/quiz` và các trang tạo, xem, sửa | DashboardLayout, trình soạn, chi tiết và bộ điều khiển bài kiểm tra |
+| `/admin/students`, `/teacher/students` | DashboardLayout, biểu mẫu học sinh và nhập Excel |
+| `/admin/results`, `/teacher/results` | DashboardLayout, bảng kết quả, duyệt yêu cầu và dialog chấm điểm |
+| `/q/[token]` | AssessmentLayout, form vào bài, câu hỏi và dialog nộp bài |
+
+`NativeSelect` dùng cho trường cần tham gia FormData hoặc thao tác chọn theo nền tảng. `Select` dùng cho lựa chọn tùy biến có điều hướng Radix. Lỗi tải danh mục dùng `ErrorToast`, thông tin cần đọc tiếp dùng `Alert`, và lỗi nhập liệu đi cùng trường. Màu trạng thái và kích thước điều khiển lấy từ token trong CSS.
+
+Các module trong `features` quản lý logic và giao diện theo luồng. Đặt trạng thái hoàn toàn thuộc một hộp thoại hoặc biểu mẫu trong module đó. Layout và UI primitive chỉ nhận dữ liệu hoặc callback cần để hiển thị.

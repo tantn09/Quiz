@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Be_Vietnam_Pro } from "next/font/google";
+import { ErrorToastProvider } from "@/components/ui/toast";
 import { ThemeBootstrap } from "@/components/theme-bootstrap";
 import { AppMantineProvider } from "@/components/mantine-theme";
 import "@mantine/core/styles.css";
@@ -14,5 +15,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="vi" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: 'try{var theme=localStorage.getItem("quiz-theme");document.documentElement.dataset.theme=theme==="dark"||theme==="light"?theme:window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){}' }} /></head><body className={beVietnamPro.variable}><AppMantineProvider><ThemeBootstrap />{children}</AppMantineProvider></body></html>;
+  return <html lang="vi" suppressHydrationWarning><head><script dangerouslySetInnerHTML={{ __html: 'try{var theme=localStorage.getItem("quiz-theme");document.documentElement.dataset.theme=theme==="dark"||theme==="light"?theme:window.matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light"}catch(e){}' }} /></head><body className={beVietnamPro.variable}><AppMantineProvider><ThemeBootstrap /><ErrorToastProvider>{children}</ErrorToastProvider></AppMantineProvider></body></html>;
 }

@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import Link from "next/link";
+import { Button } from "@/components/ui/button";
 import { ArrowRight, BarChart3, Check, CheckCircle2, FileQuestion, Link2, MousePointer2, Sparkles, Star, WandSparkles } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
 
@@ -21,7 +22,7 @@ export default function HomePage() {
         </Link>
         <nav className="flex items-center gap-6" aria-label={t("Điều hướng chính")}>
           <a href="#tinh-nang" className="hidden text-sm font-semibold text-content-muted hover:text-content sm:inline">{t("Tính năng")}</a>
-          <Link href="/login" className="landing-v2-login inline-flex min-h-11 items-center gap-2 rounded-full px-5 text-sm font-bold text-white transition-transform hover:-translate-y-0.5">{t("Đăng nhập")}<ArrowRight size={16} aria-hidden="true" /></Link>
+          <Button asChild><Link href="/login" className="landing-v2-login inline-flex min-h-11 items-center gap-2 rounded-full px-5 text-sm font-bold text-white transition-transform hover:-translate-y-0.5">{t("Đăng nhập")}<ArrowRight size={16} aria-hidden="true" /></Link></Button>
         </nav>
       </header>
 
@@ -31,7 +32,7 @@ export default function HomePage() {
           <h1 className="mt-7 text-[clamp(3.3rem,6.1vw,5.7rem)] font-black leading-[1.04] tracking-[-.06em]">{t("Dạy học thú vị.")}<br /><span className="landing-v2-gradient-text">{t("Đánh giá dễ dàng.")}</span></h1>
           <p className="mt-7 max-w-lg text-lg leading-8 text-content-muted">{t("Tạo bài kiểm tra trong vài phút, gửi một đường link cho học sinh và theo dõi kết quả ngay trên cùng một nơi.")}</p>
           <div className="mt-9 flex flex-col gap-3 sm:flex-row">
-            <Link href="/login" className="landing-v2-primary inline-flex min-h-13 items-center justify-center gap-3 rounded-2xl px-7 py-3 font-bold text-white transition-transform hover:-translate-y-0.5">{t("Bắt đầu tạo bài kiểm tra")}<ArrowRight size={18} aria-hidden="true" /></Link>
+            <Button asChild><Link href="/login" className="landing-v2-primary inline-flex min-h-13 items-center justify-center gap-3 rounded-2xl px-7 py-3 font-bold text-white transition-transform hover:-translate-y-0.5">{t("Bắt đầu tạo bài kiểm tra")}<ArrowRight size={18} aria-hidden="true" /></Link></Button>
             <a href="#tinh-nang" className="landing-v2-secondary inline-flex min-h-13 items-center justify-center rounded-2xl px-7 py-3 font-bold transition-transform hover:-translate-y-0.5">{t("Khám phá tính năng")}</a>
           </div>
           <p className="mt-6 flex items-center gap-2 text-sm text-content-muted"><CheckCircle2 size={17} className="text-brand" aria-hidden="true" />{t("Dành cho giáo viên, học sinh và người quản lý")}</p>
@@ -55,7 +56,7 @@ export default function HomePage() {
 
       <section id="tinh-nang" className="landing-v2-features py-20 sm:py-28"><div className="mx-auto max-w-7xl px-5 sm:px-8"><div className="mx-auto max-w-2xl text-center"><p className="text-sm font-extrabold uppercase tracking-[.18em] text-brand">{t("Đơn giản từ đầu đến cuối")}</p><h2 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">{t("Mọi thứ bạn cần cho một buổi học hiệu quả.")}</h2><p className="mt-4 text-content-muted">{t("Tập trung vào việc dạy và học. Những phần còn lại đã có Bài kiểm tra lớp học hỗ trợ.")}</p></div><div className="mt-12 grid gap-5 md:grid-cols-3">{steps.map(({ number, icon: Icon, title, body, tone }) => <article key={number} className={`landing-v2-step landing-v2-step-${tone} rounded-[28px] p-7 sm:p-8`}><div className="flex items-start justify-between"><span className="landing-v2-step-icon flex size-14 items-center justify-center rounded-[20px]"><Icon size={26} strokeWidth={1.9} aria-hidden="true" /></span><span className="text-2xl font-black opacity-25">{number}</span></div><h3 className="mt-10 text-xl font-bold">{title}</h3><p className="mt-3 leading-7 text-content-muted">{body}</p></article>)}</div></div></section>
 
-      <section className="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28"><div className="landing-v2-cta relative overflow-hidden rounded-[36px] px-7 py-14 text-center text-white sm:px-14 sm:py-20"><div className="relative z-10 mx-auto max-w-2xl"><p className="text-sm font-bold uppercase tracking-[.18em] text-white/80">{t("Sẵn sàng cho lớp học tiếp theo?")}</p><h2 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">{t("Một bài kiểm tra hay bắt đầu từ một ý tưởng nhỏ.")}</h2><p className="mt-5 leading-7 text-white/85">{t("Đăng nhập và biến ý tưởng đó thành hoạt động học tập đáng nhớ.")}</p><Link href="/login" className="mt-8 inline-flex min-h-12 items-center gap-2 rounded-full bg-white px-7 font-bold text-blue-700 transition-transform hover:-translate-y-0.5">{t("Đăng nhập để bắt đầu")}<ArrowRight size={18} aria-hidden="true" /></Link></div><div className="landing-v2-cta-deco" aria-hidden="true" /></div></section>
+      <section className="mx-auto max-w-7xl px-5 py-20 sm:px-8 sm:py-28"><div className="landing-v2-cta relative overflow-hidden rounded-[36px] px-7 py-14 text-center text-white sm:px-14 sm:py-20"><div className="relative z-10 mx-auto max-w-2xl"><p className="text-sm font-bold uppercase tracking-[.18em] text-white/80">{t("Sẵn sàng cho lớp học tiếp theo?")}</p><h2 className="mt-4 text-3xl font-black tracking-tight sm:text-5xl">{t("Một bài kiểm tra hay bắt đầu từ một ý tưởng nhỏ.")}</h2><p className="mt-5 leading-7 text-white/85">{t("Đăng nhập và biến ý tưởng đó thành hoạt động học tập đáng nhớ.")}</p><Button asChild><Link href="/login" className="mt-8 inline-flex min-h-12 items-center gap-2 rounded-full bg-white px-7 font-bold text-blue-700 transition-transform hover:-translate-y-0.5">{t("Đăng nhập để bắt đầu")}<ArrowRight size={18} aria-hidden="true" /></Link></Button></div><div className="landing-v2-cta-deco" aria-hidden="true" /></div></section>
       <footer className="border-t border-line py-7"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-2 px-5 text-sm text-content-muted sm:flex-row sm:px-8"><span className="font-bold text-content">quiz<span className="text-brand">.</span>lớp học</span><span>{t("Học tập chủ động, mỗi ngày một chút.")}</span></div></footer>
     </main>
   );

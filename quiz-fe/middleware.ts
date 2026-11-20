@@ -17,8 +17,8 @@ export async function middleware(request: NextRequest) {
 
     if (sharedPage && sharedPage[1] !== user.role) {
       destination = `/${user.role}/${sharedPage[2]}`;
-    } else if (pathname === "/teacher") {
-      destination = quizPath;
+    } else if (pathname === "/teacher" && user.role === "admin") {
+      destination = "/admin";
     } else if (pathname === legacyQuizPath || pathname.startsWith(legacyQuizPath + "/")) {
       destination = quizPath + pathname.slice(legacyQuizPath.length);
     } else if (user.role === "admin" && (pathname === "/teacher/quiz" || pathname.startsWith("/teacher/quiz/"))) {

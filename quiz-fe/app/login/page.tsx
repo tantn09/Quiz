@@ -1,5 +1,7 @@
 "use client";
 
+import { useErrorToast } from "@/components/ui/toast";
+import { AuthLayout } from "@/components/page-layouts";
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -11,6 +13,7 @@ import { Alert } from "@/components/ui/alert";
 export default function LoginPage() {
   const router = useRouter();
   const t = useTranslation();
+  const showError = useErrorToast();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -32,16 +35,16 @@ export default function LoginPage() {
       applyLanguage(user.language);
       document.documentElement.dataset.theme = user.theme;
       document.documentElement.lang = user.language;
-      router.replace(user.role === "admin" ? "/admin" : "/teacher/quiz");
+      router.replace(user.role === "admin" ? "/admin" : "/teacher");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : t("Không thể đăng nhập lúc này."));
+      showError(reason instanceof Error ? reason.message : t("Không thể đăng nhập lúc này."));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main className="ds-gradient-soft flex min-h-screen items-center justify-center px-5 py-12">
+    <AuthLayout>
       <form onSubmit={submit} className="w-full max-w-md rounded-3xl border border-line bg-surface p-8 shadow-sm">
         <p className="text-sm font-semibold text-brand">{t("BÀI KIỂM TRA LỚP HỌC")}</p>
         <h1 className="mt-3 text-3xl font-bold">{t("Đăng nhập")}</h1>
@@ -56,6 +59,6 @@ export default function LoginPage() {
         <Button disabled={busy} className="mt-6 w-full">{busy ? t("Đang đăng nhập…") : t("Đăng nhập")}</Button>
         <p className="mt-6 text-center text-sm text-content-muted">{t("Chưa có tài khoản?")} <Link href="/register" className="font-semibold text-brand underline underline-offset-4">{t("Đăng ký giáo viên")}</Link></p>
       </form>
-    </main>
+    </AuthLayout>
   );
 }
