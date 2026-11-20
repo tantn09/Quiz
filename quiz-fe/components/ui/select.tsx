@@ -16,15 +16,15 @@ export function Select({ value, onValueChange, options, ariaLabel, className, di
   disabled?: boolean;
 }) {
   return <SelectPrimitive.Root value={value === "" ? EMPTY : value} onValueChange={(next) => onValueChange(next === EMPTY ? "" : next)} disabled={disabled}>
-    <SelectPrimitive.Trigger aria-label={ariaLabel} className={cn("quiz-select-trigger flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-line bg-surface py-2.5 pl-4 pr-5 text-left text-sm text-content shadow-sm transition-colors hover:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50", className)}>
-      <SelectPrimitive.Value />
-      <SelectPrimitive.Icon className="ml-3 flex shrink-0 items-center text-content-muted"><ChevronDown size={18} strokeWidth={2} aria-hidden="true" /></SelectPrimitive.Icon>
+    <SelectPrimitive.Trigger aria-label={ariaLabel} className={cn("quiz-select-trigger flex min-h-11 w-full items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-2 text-left text-sm text-content shadow-sm transition-colors hover:border-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50", className)}>
+      <span className="min-w-0 whitespace-normal [overflow-wrap:anywhere]"><SelectPrimitive.Value /></span>
+      <SelectPrimitive.Icon className="flex shrink-0 items-center text-content-muted"><ChevronDown size={18} strokeWidth={2} aria-hidden="true" /></SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content position="popper" sideOffset={6} align="start" onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }} className="quiz-select-content z-[100] max-h-[min(20rem,var(--radix-select-content-available-height))] w-[var(--radix-select-trigger-width)] overflow-hidden rounded-xl border border-line bg-surface p-1.5 text-content shadow-xl">
         <SelectPrimitive.Viewport className="max-h-[19rem] overflow-y-auto">
           {options.map((option) => <SelectPrimitive.Item key={option.value} value={option.value === "" ? EMPTY : option.value} className="relative flex min-h-11 cursor-pointer select-none items-center rounded-xl border border-transparent px-3 py-2.5 pr-10 text-sm outline-none transition-colors data-[highlighted]:border-line data-[highlighted]:bg-surface-accent data-[highlighted]:text-content data-[state=checked]:border-brand data-[state=checked]:bg-surface-accent data-[state=checked]:font-semibold data-[state=checked]:text-brand data-[disabled]:pointer-events-none data-[disabled]:opacity-50">
-            <SelectPrimitive.ItemText>{option.label}</SelectPrimitive.ItemText>
+            <SelectPrimitive.ItemText className="min-w-0 [overflow-wrap:anywhere]">{option.label}</SelectPrimitive.ItemText>
             <SelectPrimitive.ItemIndicator className="absolute right-3 inline-flex items-center"><Check size={16} aria-hidden="true" /></SelectPrimitive.ItemIndicator>
           </SelectPrimitive.Item>)}
         </SelectPrimitive.Viewport>

@@ -11,7 +11,10 @@ import { TableKit } from "@tiptap/extension-table";
 import { Color, TextStyle } from "@tiptap/extension-text-style";
 import Underline from "@tiptap/extension-underline";
 import FileHandler from "@tiptap/extension-file-handler";
-import { Button, Group, Menu, Modal, TextInput } from "@mantine/core";
+import { Menu, Modal } from "@mantine/core";
+import { Button } from "@/components/ui/button";
+import { Field, Input } from "@/components/ui/field";
+import { useTranslation } from "@/lib/i18n";
 import { RichTextEditor } from "@mantine/tiptap";
 import { ImagePlus, Link2, Table2 } from "lucide-react";
 
@@ -28,6 +31,7 @@ const extensions = [StarterKit, Image, Link.configure({ openOnClick: false }), T
 
 export function PromptEditor({ value, onChange }: { value: PromptDocument; onChange: (value: PromptDocument) => void }) {
   const showError = useErrorToast();
+  const t = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const [alt, setAlt] = useState("");
@@ -61,7 +65,7 @@ export function PromptEditor({ value, onChange }: { value: PromptDocument; onCha
       const { id } = await response.json();
       editor?.chain().focus().setImage({ src: `/api/public/assets/${id}`, alt: alt.trim() }).run();
       setPendingFile(null);
-    } catch { showError("Không tải được ảnh. Vui lòng thử lại."); } finally { setBusy(false); }
+    } catch { showError(t("Không tải được ảnh đề bài.")); } finally { setBusy(false); }
   }
 
   function saveLink() {
@@ -69,27 +73,48 @@ export function PromptEditor({ value, onChange }: { value: PromptDocument; onCha
     editor?.chain().focus().setLink({ href }).run(); setError(""); setLinkOpen(false);
   }
 
+  const dialogClasses = { content: "quiz-editor-dialog", header: "quiz-editor-dialog-header", close: "quiz-editor-dialog-close" };
   return <>
     <RichTextEditor editor={editor} className="quiz-editor quiz-richtext">
-      <RichTextEditor.Toolbar aria-label="Định dạng đề bài" className="quiz-editor-toolbar">
+      <RichTextEditor.Toolbar aria-label={t("Định dạng đề bài")} className="quiz-editor-toolbar">
         <RichTextEditor.ControlsGroup><RichTextEditor.Bold /><RichTextEditor.Italic /><RichTextEditor.Underline /><RichTextEditor.Strikethrough /></RichTextEditor.ControlsGroup>
         <RichTextEditor.ControlsGroup><RichTextEditor.H1 /><RichTextEditor.H2 /><RichTextEditor.H3 /><RichTextEditor.Blockquote /></RichTextEditor.ControlsGroup>
         <RichTextEditor.ControlsGroup><RichTextEditor.BulletList /><RichTextEditor.OrderedList /></RichTextEditor.ControlsGroup>
         <RichTextEditor.ControlsGroup><RichTextEditor.AlignLeft /><RichTextEditor.AlignCenter /><RichTextEditor.AlignRight /><RichTextEditor.AlignJustify /></RichTextEditor.ControlsGroup>
         <RichTextEditor.ControlsGroup><RichTextEditor.ColorPicker colors={["#20223d", "#5145c7", "#2563c8", "#c7355c", "#147d64", "#b45309"]} /><RichTextEditor.UnsetColor /></RichTextEditor.ControlsGroup>
         <RichTextEditor.ControlsGroup>
-          <RichTextEditor.Control aria-label="Chèn hoặc sửa liên kết" title="Liên kết" active={!!editor?.isActive("link")} onClick={() => { setHref(editor?.getAttributes("link").href || ""); setLinkOpen(true); }}><Link2 size={16} /></RichTextEditor.Control>
+          <RichTextEditor.Control aria-label={t("Chèn hoặc sửa liên kết")} title={t("Liên kết")} active={!!editor?.isActive("link")} onClick={() => { setError(""); setHref(editor?.getAttributes("link").href || ""); setLinkOpen(true); }}><Link2 size={16} /></RichTextEditor.Control>
           <RichTextEditor.Unlink />
-          <Menu withinPortal position="bottom-start"><Menu.Target><RichTextEditor.Control aria-label="Tùy chọn bảng" title="Bảng"><Table2 size={16} /></RichTextEditor.Control></Menu.Target><Menu.Dropdown><Menu.Item onClick={() => editor?.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()}>Chèn bảng 2 × 2</Menu.Item><Menu.Item disabled={!editor?.isActive("table")} onClick={() => editor?.chain().focus().addRowAfter().run()}>Thêm dòng</Menu.Item><Menu.Item disabled={!editor?.isActive("table")} onClick={() => editor?.chain().focus().addColumnAfter().run()}>Thêm cột</Menu.Item><Menu.Item disabled={!editor?.isActive("table")} onClick={() => editor?.chain().focus().deleteTable().run()}>Xóa bảng</Menu.Item></Menu.Dropdown></Menu>
-          <RichTextEditor.Control aria-label="Chèn ảnh" title="Chèn ảnh" disabled={busy} onClick={() => fileRef.current?.click()}><ImagePlus size={16} /></RichTextEditor.Control>
+          <Menu withinPortal position="bottom-start"><Menu.Target><RichTextEditor.Control aria-label={t("Tùy chọn bảng")} title={t("Bảng")}><Table2 size={16} /></RichTextEditor.Control></Menu.Target><Menu.Dropdown className="quiz-editor-menu"><Menu.Item onClick={() => editor?.chain().focus().insertTable({ rows: 2, cols: 2, withHeaderRow: true }).run()}>{t("Chèn bảng 2 × 2")}</Menu.Item><Menu.Item disabled={!editor?.isActive("table")} onClick={() => editor?.chain().focus().addRowAfter().run()}>{t("Thêm dòng")}</Menu.Item><Menu.Item disabled={!editor?.isActive("table")} onClick={() => editor?.chain().focus().addColumnAfter().run()}>{t("Thêm cột")}</Menu.Item><Menu.Item disabled={!editor?.isActive("table")} onClick={() => editor?.chain().focus().deleteTable().run()}>{t("Xóa bảng")}</Menu.Item></Menu.Dropdown></Menu>
+          <RichTextEditor.Control aria-label={t("Chèn ảnh")} title={t("Chèn ảnh")} disabled={busy} onClick={() => fileRef.current?.click()}><ImagePlus size={16} /></RichTextEditor.Control>
         </RichTextEditor.ControlsGroup>
         <RichTextEditor.ControlsGroup><RichTextEditor.Undo /><RichTextEditor.Redo /></RichTextEditor.ControlsGroup>
       </RichTextEditor.Toolbar>
       <RichTextEditor.Content />
     </RichTextEditor>
-    <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; if (file) chooseFile(file); event.target.value = ""; }} />
-    {error && <p role="alert" className="mt-2 text-sm text-red-700">{error}</p>}
-    <Modal opened={!!pendingFile} onClose={() => { if (!busy) setPendingFile(null); }} title="Mô tả ảnh" centered><form onSubmit={(event) => { event.preventDefault(); void upload(); }}><TextInput label="Mô tả cho người dùng trình đọc màn hình" value={alt} onChange={(event) => setAlt(event.currentTarget.value)} required autoFocus /><Group justify="flex-end" mt="md"><Button variant="default" onClick={() => setPendingFile(null)} disabled={busy}>Hủy</Button><Button type="submit" loading={busy}>Chèn ảnh</Button></Group></form></Modal>
-    <Modal opened={linkOpen} onClose={() => setLinkOpen(false)} title="Liên kết" centered><form onSubmit={(event) => { event.preventDefault(); saveLink(); }}><TextInput label="URL" placeholder="https://example.com/" value={href} onChange={(event) => setHref(event.currentTarget.value)} required autoFocus /><Group justify="flex-end" mt="md"><Button variant="default" onClick={() => setLinkOpen(false)}>Hủy</Button><Button type="submit">Lưu</Button></Group></form></Modal>
+    <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) chooseFile(file); event.target.value = ""; }} />
+    {error && !linkOpen && <p role="alert" className="mt-2 rounded-xl ds-error p-3 text-sm">{t(error)}</p>}
+    <Modal opened={!!pendingFile} onClose={() => { if (!busy) setPendingFile(null); }} title={t("Mô tả ảnh")} centered classNames={dialogClasses} closeButtonProps={{ "aria-label": t("Đóng"), disabled: busy }}>
+      <form onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); void upload(); }}>
+        <Field label={t("Mô tả cho người dùng trình đọc màn hình")}>
+          <Input className="mt-2" value={alt} onChange={(event) => setAlt(event.currentTarget.value)} required disabled={busy} data-autofocus />
+        </Field>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => setPendingFile(null)} disabled={busy}>{t("Hủy")}</Button>
+          <Button type="submit" disabled={busy}>{t(busy ? "Đang tải ảnh…" : "Chèn ảnh")}</Button>
+        </div>
+      </form>
+    </Modal>
+    <Modal opened={linkOpen} onClose={() => { setError(""); setLinkOpen(false); }} title={t("Liên kết")} centered classNames={dialogClasses} closeButtonProps={{ "aria-label": t("Đóng") }}>
+      <form onSubmit={(event) => { event.preventDefault(); event.stopPropagation(); saveLink(); }}>
+        <Field label="URL" error={error ? t(error) : undefined}>
+          <Input className="mt-2" placeholder="https://example.com/" value={href} onChange={(event) => { setHref(event.currentTarget.value); setError(""); }} aria-invalid={!!error} required data-autofocus />
+        </Field>
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" onClick={() => { setError(""); setLinkOpen(false); }}>{t("Hủy")}</Button>
+          <Button type="submit">{t("Lưu")}</Button>
+        </div>
+      </form>
+    </Modal>
   </>;
 }
