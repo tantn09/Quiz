@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch, ApiError, reportApiError } from "@/lib/api-request";
 import { useErrorToast } from "@/components/ui/toast";
 import { Input, Textarea } from "@/components/ui/field";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
@@ -83,18 +84,25 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   }
   const t = useTranslation();
   const showError = useErrorToast();
-  useEffect(() => { void fetch("/api/teacher/catalogs", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); const data = await response.json(); setSubjects(data.subjects); setGradeLevels(data.gradeLevels); }).catch(() => showError(t("Không tải được danh mục."))).finally(() => setCatalogLoading(false)); }, [showError, t]);
+  useEffect(() => { void apiFetch("/api/teacher/catalogs", { cache: "no-store" }).then(async (response) => { const data = await response.json(); setSubjects(data.subjects); setGradeLevels(data.gradeLevels); }).catch((error) => reportApiError(error, "Không tải được danh mục.", t, showError)).finally(() => setCatalogLoading(false)); }, [showError, t]);
 
-  const load = useCallback(async () => {
-    const query = new URLSearchParams();
-    if (search) query.set("search", search);
-    if (status) query.set("status", status);
-    const response = await fetch(`/api/teacher/quizzes?${query}`, { cache: "no-store" });
-    if (!response.ok) { showError(t("Không tải được danh sách bài kiểm tra.")); return; }
-    setQuizzes((await response.json()).quizzes);
+  const load = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const query = new URLSearchParams();
+      if (search) query.set("search", search);
+      if (status) query.set("status", status);
+      const response = await apiFetch(`/api/teacher/quizzes?${query}`, { cache: "no-store", signal });
+
+      setQuizzes((await response.json()).quizzes);
+    } catch (error) { reportApiError(error, "Không tải được danh sách bài kiểm tra.", t, showError); }
   }, [search, status, showError, t]);
 
-  useEffect(() => { if (mode === "list") void load().catch(() => showError(t("Không tải được danh sách bài kiểm tra."))).finally(() => setListLoading(false)); }, [load, mode, showError, t]);
+  useEffect(() => {
+    if (mode !== "list") return;
+    const controller = new AbortController();
+    void load(controller.signal).finally(() => { if (!controller.signal.aborted) setListLoading(false); });
+    return () => controller.abort();
+  }, [load, mode]);
   useEffect(() => {
     if (mode === "create") {
       const stored = sessionStorage.getItem("quiz-import-draft");
@@ -107,18 +115,20 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
           setExpiresAt(draft.linkExpiresAt ? localDateTime(new Date(draft.linkExpiresAt)) : "");
           setQuestions(draft.questions.map((question) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, points: question.points, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1 })));
           setCollapsedQuestionIds(new Set());
-        } catch { showError(t("Không đọc được file Excel.")); }
+        } catch (error) { reportApiError(error, "Không đọc được file Excel.", t, showError); }
       }
       setFormOpen(true); return;
     }
     if (!params.id) return;
-    const response = fetch(`/api/teacher/quizzes/${params.id}`, { cache: "no-store" });
+    const controller = new AbortController();
+    const response = apiFetch(`/api/teacher/quizzes/${params.id}`, { cache: "no-store", signal: controller.signal });
     void response.then(async (result) => {
       if (!result.ok) throw new Error();
       const payload = await result.json() as QuizDetail;
       if (mode === "view") { setDetailQuiz(payload.quiz); setDetail(payload); }
       if (mode === "edit") void edit(payload.quiz, payload);
-    }).catch(() => { setDetailError(true); showError(t(mode === "view" ? "Không tải được chi tiết bài kiểm tra. Vui lòng thử lại." : "Không tải được bài kiểm tra để sửa.")); });
+    }).catch((error) => { if (controller.signal.aborted) return; setDetailError(true); reportApiError(error, mode === "view" ? "Không tải được chi tiết bài kiểm tra. Vui lòng thử lại." : "Không tải được bài kiểm tra để sửa.", t, showError); });
+    return () => controller.abort();
   // Load the route's quiz once; edit() populates the shared form state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, params.id]);
@@ -136,9 +146,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     if (!file.name.toLowerCase().endsWith(".xlsx") || file.size > 2_000_000) { setImportErrors([{ sheet: "File", row: 0, column: "file", message: t("Chỉ nhận file .xlsx tối đa 2 MB.") }]); return; }
     setImportBusy(true); setImportErrors([]);
     try {
-      const { response, payload } = await previewQuizImport(file);
-      if (!response.ok || !payload.draft) { showError(t("Không đọc được file Excel.")); setImportErrors(payload.errors?.length ? payload.errors : [{ sheet: "File", row: 0, column: "file", message: t("Không đọc được file Excel.") }]); return; }
-      const draft = payload.draft;
+      const { draft } = await previewQuizImport(file);
       if (mode === "list") { sessionStorage.setItem("quiz-import-draft", JSON.stringify(draft)); router.push(quizPath + "/new"); return; }
       setSubject(""); setGradeLevel("");
       setTitle(draft.title); setDescription(draft.description); setPromptDocument(draft.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(draft.promptDocument?.content?.length)); setDuration(draft.durationMinutes);
@@ -146,7 +154,11 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
       setQuestions(draft.questions.map((question) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, points: question.points, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1 })));
       setCollapsedQuestionIds(new Set());
       setImportErrors([]); setFormError(""); setEditing(null); setFormOpen(true);
-    } catch { showError(t("Không đọc được file Excel.")); }
+    } catch (error) {
+      const issues = error instanceof ApiError ? error.payload.errors : undefined;
+      if (Array.isArray(issues)) setImportErrors(issues);
+      reportApiError(error, "Không đọc được file Excel.", t, showError);
+    }
     finally { setImportBusy(false); }
   }
 
@@ -179,16 +191,19 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
         points: question.points,
       })),
     };
-    let response: Response;
+    let result;
     try {
-      response = await fetch(editing ? `/api/teacher/quizzes/${editing}` : "/api/teacher/quizzes", {
+      const response = await apiFetch(editing ? `/api/teacher/quizzes/${editing}` : "/api/teacher/quizzes", {
         method: editing ? "PUT" : "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload),
       });
-    } catch { showError(t("Chưa lưu được bài kiểm tra. Kiểm tra câu trắc nghiệm có ít nhất hai lựa chọn và đáp án đúng hợp lệ.")); setBusy(false); return; }
-    setBusy(false);
-    if (!response.ok) { showError(t("Chưa lưu được bài kiểm tra. Kiểm tra câu trắc nghiệm có ít nhất hai lựa chọn và đáp án đúng hợp lệ.")); return; }
-    const result = await response.json().catch(() => ({}));
-    if (draftKey) localStorage.removeItem(draftKey);
+      result = await response.json();
+    } catch (error) {
+      reportApiError(error, "Chưa lưu được bài kiểm tra.", t, showError);
+      return;
+    } finally { setBusy(false); }
+    if (draftKey) {
+      try { localStorage.removeItem(draftKey); } catch { /* The quiz has already been saved. */ }
+    }
     if (mode !== "list") { router.push(`${quizPath}/${editing ?? result.quiz?.id}`); return; }
     setNotice(!editing && result.link ? `${t("Đã tạo bài kiểm tra. Link:")} ${window.location.origin}${result.link}` : t("Đã lưu bài kiểm tra."));
     clearForm();
@@ -216,34 +231,50 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     setContentVariantId("");
     setDetailQuiz(quiz); setDetail(null); setDetailError(false);
     try {
-      const response = await fetch(`/api/teacher/quizzes/${quiz.id}`, { cache: "no-store" });
-      if (!response.ok) throw new Error();
+      const response = await apiFetch(`/api/teacher/quizzes/${quiz.id}`, { cache: "no-store" });
       setDetail(await response.json() as QuizDetail);
-    } catch { showError(t("Không tải được chi tiết bài kiểm tra. Vui lòng thử lại.")); setDetailError(true); }
+    } catch (error) { reportApiError(error, "Không tải được chi tiết bài kiểm tra. Vui lòng thử lại.", t, showError); setDetailError(true); }
   }
 
   async function showContent() {
     setDetailTab("content");
     if (!detail) return;
-    const response = await fetch(`/api/teacher/quizzes/${detail.quiz.id}`, { cache: "no-store" });
-    if (!response.ok) { showError(t("Không tải được chi tiết bài kiểm tra. Vui lòng thử lại.")); return; }
-    setDetail(await response.json() as QuizDetail);
+    try {
+      const response = await apiFetch(`/api/teacher/quizzes/${detail.quiz.id}`, { cache: "no-store" });
+      setDetail(await response.json() as QuizDetail);
+    } catch (error) { reportApiError(error, "Không tải được chi tiết bài kiểm tra. Vui lòng thử lại.", t, showError); }
   }
 
   async function stop(quiz: QuizRow) {
-    const response = await fetch(`/api/teacher/quizzes/${quiz.id}/stop`, { method: "POST" });
-    if (response.ok) setNotice(`${t("Đã ngừng bài kiểm tra:")} ${quiz.title}`);
-    else showError(t("Không thể ngừng bài kiểm tra."));
-    if (response.ok) setDetail((current) => current?.quiz.id === quiz.id ? { ...current, quiz: { ...current.quiz, status: "inactive" } } : current);
-    await load();
+    try {
+      await apiFetch(`/api/teacher/quizzes/${quiz.id}/stop`, { method: "POST" });
+      setNotice(`${t("Đã ngừng bài kiểm tra:")} ${quiz.title}`);
+      setDetail((current) => current?.quiz.id === quiz.id ? { ...current, quiz: { ...current.quiz, status: "inactive" } } : current);
+      await load();
+    } catch (error) { reportApiError(error, "Không thể ngừng bài kiểm tra.", t, showError); }
   }
 
   async function deleteQuiz(quiz: QuizRow) {
     if (!window.confirm(`${t("Xóa bài kiểm tra này khỏi danh sách?")} ${quiz.title}`)) return;
-    const response = await fetch(`/api/teacher/quizzes/${quiz.id}`, { method: "DELETE" });
-    if (response.ok) setNotice(t("Đã xóa bài kiểm tra khỏi danh sách. Kết quả đã nộp vẫn được giữ lại."));
-    else showError(t("Không xóa được bài kiểm tra."));
-    if (response.ok) { await load(); if (mode === "view") router.push(quizPath); else setDetailQuiz(null); }
+    try {
+      await apiFetch(`/api/teacher/quizzes/${quiz.id}`, { method: "DELETE" });
+      setNotice(t("Đã xóa bài kiểm tra khỏi danh sách. Kết quả đã nộp vẫn được giữ lại."));
+      if (mode === "view") router.push(quizPath);
+      else { setDetailQuiz(null); await load(); }
+    } catch (error) { reportApiError(error, "Không xóa được bài kiểm tra.", t, showError); }
+  }
+
+  async function downloadTemplate() {
+    try {
+      const response = await apiFetch("/api/teacher/quizzes/import-template.xlsx");
+      const file = await response.blob();
+      const url = URL.createObjectURL(file);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "quiz-import-template.xlsx";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) { reportApiError(error, "Không tải được file mẫu.", t, showError); }
   }
 
   const { linkQuiz, setLinkQuiz, newLinkExpiry, setNewLinkExpiry, linkError, setLinkError, linkBusy, openLinkExpiry, extendLink, copyLink } = useQuizLink({ load, setDetail, setNotice });
@@ -262,11 +293,10 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     setTimeBusy(true);
     setTimeError("");
     try {
-      const response = await fetch(`/api/teacher/quizzes/${timeQuiz.id}/extend-attempts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ additionalMinutes: minutes }) });
-      if (!response.ok) throw new Error();
+      await apiFetch(`/api/teacher/quizzes/${timeQuiz.id}/extend-attempts`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ additionalMinutes: minutes }) });
       setNotice(t("Đã gia hạn thời gian cho các lượt chưa nộp."));
       setTimeQuiz(null);
-    } catch { showError(t("Không gia hạn được thời gian.")); }
+    } catch (error) { reportApiError(error, "Không gia hạn được thời gian.", t, showError); }
     finally { setTimeBusy(false); }
   }
 
@@ -274,10 +304,9 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     event.preventDefault();
     if (!cloneSource || !cloneClass.trim()) return;
     setCloneBusy(true);
-    try { const response = await fetch(`/api/teacher/quizzes/${cloneSource.id}/clone`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assignedClass: cloneClass.trim() }) });
-      if (!response.ok) throw new Error();
+    try { await apiFetch(`/api/teacher/quizzes/${cloneSource.id}/clone`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assignedClass: cloneClass.trim() }) });
       setCloneSource(null); setCloneClass(""); setNotice("Đã clone bài kiểm tra. Bản mới đang đóng; mở thủ công khi sẵn sàng."); await load();
-    } catch { showError(t("Không thể clone bài kiểm tra.")); } finally { setCloneBusy(false); }
+    } catch (error) { reportApiError(error, "Không thể clone bài kiểm tra.", t, showError); } finally { setCloneBusy(false); }
   }
 
 
@@ -288,7 +317,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     || (!detailError && (mode === "edit" && !formOpen || mode === "view" && !detail))) return <DashboardLoading />;
 
   return <DashboardContent compact={mode === "create"}>
-    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Excel")}</Button><Button asChild variant="outline"><a href="/api/teacher/quizzes/import-template.xlsx" download>{t("Tải file mẫu")}</a></Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
+    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Excel")}</Button><Button type="button" variant="outline" onClick={() => void downloadTemplate()}>{t("Tải file mẫu")}</Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
     {mode !== "list" && <div className={mode === "create" ? "px-[calc(1.25rem+1px)] sm:px-[calc(2rem+1px)]" : undefined}><PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={mode === "create" ? t("Tạo bài kiểm tra mới") : mode === "edit" ? t("Sửa bài kiểm tra") : t("Chi tiết bài kiểm tra")} description={mode === "create" ? t("Điền thông tin, thêm câu hỏi rồi tạo bài kiểm tra.") : undefined} action={<Button asChild variant="outline"><Link href={quizPath}>{t("Về danh sách bài kiểm tra")}</Link></Button>} /></div>}
     <Input ref={importInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importExcel(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
     {mode === "list" && importErrors.length > 0 && <div role="alert" className="mt-5 rounded-xl ds-error p-4 text-sm"><p className="font-semibold">{t("File Excel có lỗi:")}</p><ul className="mt-2 list-disc pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t("dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}

@@ -1,3 +1,4 @@
+import { validationError } from "../api-errors.js";
 import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq, ilike, inArray, isNull, ne, or, sql } from "drizzle-orm";
@@ -15,7 +16,7 @@ const questionInput = z.object({
   points: z.number().min(0).max(1000).multipleOf(0.25).default(1),
 }).superRefine((question, context) => {
   if (question.type === "choice" && (question.options.length < 2 || question.correctOption === null || question.correctOption >= question.options.length)) {
-    context.addIssue({ code: "custom", message: "Câu trắc nghiệm cần ít nhất hai lựa chọn và đáp án đúng hợp lệ." });
+    context.addIssue({ code: "custom", path: [question.options.length < 2 ? "options" : "correctOption"], message: "Câu trắc nghiệm cần ít nhất hai lựa chọn và đáp án đúng hợp lệ." });
   }
   if (question.type === "essay" && (question.options.length > 0 || question.correctOption !== null)) {
     context.addIssue({ code: "custom", message: "Câu tự luận không có lựa chọn hoặc đáp án đúng." });
@@ -54,7 +55,7 @@ async function hasAssets(document: z.infer<typeof promptDocumentSchema>): Promis
 export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.get("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const parsed = z.object({ search: z.string().trim().max(100).optional(), status: z.enum(["active", "inactive"]).optional() }).safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!parsed.success) return reply.code(400).send(validationError(parsed.error, "query"));
     const filters = [ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     if (parsed.data.status) filters.push(eq(quizzes.status, parsed.data.status));
@@ -65,7 +66,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const parsed = quizInput.extend({ assignedClass: z.string().trim().min(1).max(80) }).safeParse(request.body);
-    if (!parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.error.flatten() });
+    if (!parsed.success) return reply.code(400).send(validationError(parsed.error));
     const labels = await resolveLabels(parsed.data);
     if (!labels) return reply.code(400).send({ error: "invalid_catalog_selection" });
     if (!(await hasAssets(parsed.data.promptDocument))) return reply.code(400).send({ error: "invalid_assets" });
@@ -91,7 +92,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
 
   app.get("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
     const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
     if (!quiz) return reply.code(404).send({ error: "not_found" });
     const variants = await db.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.deleted, false))).orderBy(quizVariants.code);
@@ -102,7 +103,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.put("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const parsed = quizInput.safeParse(request.body);
-    if (!params.success || !parsed.success) return reply.code(400).send({ error: "invalid_request", details: parsed.success ? undefined : parsed.error.flatten() });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!parsed.success) return reply.code(400).send(validationError(parsed.error));
     if (!(await hasAssets(parsed.data.promptDocument))) return reply.code(400).send({ error: "invalid_assets" });
     const filters = [eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
@@ -110,7 +112,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       const [existing] = await tx.select().from(quizzes).where(and(...filters)).for("update").limit(1);
       if (!existing) return null;
       const labels = await resolveLabels(parsed.data, existing);
-      if (!labels) return null;
+      if (!labels) return "invalid_catalog_selection" as const;
       const [quiz] = await tx.update(quizzes).set({ title: parsed.data.title, description: parsed.data.description, promptDocument: parsed.data.promptDocument, durationMinutes: parsed.data.durationMinutes, assignedClass: existing.assignedClass, linkExpiresAt: parsed.data.linkExpiresAt ? new Date(parsed.data.linkExpiresAt) : null, ...labels, updatedAt: new Date() }).where(and(...filters)).returning();
       if (!quiz) return null;
       const [primary] = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.deleted, false))).orderBy(quizVariants.code).limit(1);
@@ -118,6 +120,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       await tx.insert(questions).values(parsed.data.questions.map((question, position) => ({ ...question, quizId: quiz.id, variantId: primary.id, position })));
       return quiz;
     });
+    if (updated === "invalid_catalog_selection") return reply.code(400).send({ error: updated });
     if (!updated) return reply.code(404).send({ error: "not_found" });
     return { quiz: updated };
   });
@@ -125,7 +128,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.post("/teacher/quizzes/:id/clone", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const body = z.object({ assignedClass: z.string().trim().min(1).max(80) }).safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!body.success) return reply.code(400).send(validationError(body.error));
     const cloned = await db.transaction(async (tx) => {
       const [source] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
       if (!source) return null;
@@ -146,7 +150,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.post("/teacher/quizzes/:id/variants", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const body = z.discriminatedUnion("mode", [z.object({ mode: z.literal("manual"), questions: z.array(questionInput).min(1).max(200) }), z.object({ mode: z.literal("shuffle"), sourceVariantId: z.string().uuid() })]).safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!body.success) return reply.code(400).send(validationError(body.error));
     const result = await db.transaction(async (tx) => {
       const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).for("update").limit(1);
       if (!quiz) return null;
@@ -155,7 +160,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       if (body.data.mode === "manual") items = body.data.questions;
       else {
         const sourceVariantId = body.data.sourceVariantId;
-        if (!existing.some((variant) => variant.id === sourceVariantId && !variant.deleted)) return null;
+        if (!existing.some((variant) => variant.id === sourceVariantId && !variant.deleted)) return "variant_not_found" as const;
         const source = await tx.select().from(questions).where(eq(questions.variantId, sourceVariantId));
         const shuffle = <T,>(values: T[]) => { const copy = [...values]; for (let i = copy.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [copy[i], copy[j]] = [copy[j], copy[i]]; } return copy; };
         items = source.map((item) => {
@@ -168,6 +173,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
       await tx.insert(questions).values(items.map((item, position) => ({ ...item, quizId: quiz.id, variantId: variant.id, position })));
       return variant;
     });
+    if (result === "variant_not_found") return reply.code(404).send({ error: result });
     if (!result) return reply.code(404).send({ error: "not_found" });
     return reply.code(201).send({ variant: result });
   });
@@ -175,7 +181,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.put("/teacher/quizzes/:id/variants/:variantId", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid(), variantId: z.string().uuid() }).safeParse(request.params);
     const body = z.object({ questions: z.array(questionInput).min(1).max(200), active: z.boolean() }).safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!body.success) return reply.code(400).send(validationError(body.error));
     const result = await db.transaction(async (tx) => {
       const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).for("update").limit(1);
       if (!quiz) return "missing";
@@ -194,7 +201,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete("/teacher/quizzes/:id/variants/:variantId", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid(), variantId: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
     const outcome = await db.transaction(async (tx) => {
       const [quiz] = await tx.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).for("update").limit(1);
       if (!quiz) return "missing";
@@ -215,7 +222,7 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/teacher/quizzes/:id/stop", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
     const filters = [eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const [updated] = await db.update(quizzes).set({ status: "inactive", updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id });
@@ -226,32 +233,42 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.post("/teacher/quizzes/:id/extend-link", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const body = z.object({ linkExpiresAt: z.string().datetime() }).safeParse(request.body);
-    if (!params.success || !body.success || new Date(body.data.linkExpiresAt) <= new Date()) return reply.code(400).send({ error: "invalid_request" });
-    const filters = [eq(quizzes.id, params.data.id), eq(quizzes.status, "active")];
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!body.success) return reply.code(400).send(validationError(body.error));
+    if (new Date(body.data.linkExpiresAt) <= new Date()) return reply.code(400).send({ error: "invalid_link_expiry" });
+    const filters = [eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
-    const [updated] = await db.update(quizzes).set({ linkExpiresAt: new Date(body.data.linkExpiresAt), updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id, linkExpiresAt: quizzes.linkExpiresAt });
-    if (!updated) return reply.code(404).send({ error: "not_found" });
+    const [updated] = await db.update(quizzes).set({ linkExpiresAt: new Date(body.data.linkExpiresAt), updatedAt: new Date() }).where(and(...filters, eq(quizzes.status, "active"))).returning({ id: quizzes.id, linkExpiresAt: quizzes.linkExpiresAt });
+    if (!updated) {
+      const [existing] = await db.select({ status: quizzes.status }).from(quizzes).where(and(...filters)).limit(1);
+      if (existing?.status === "inactive") return reply.code(409).send({ error: "quiz_closed" });
+      return reply.code(404).send({ error: "not_found" });
+    }
     return { quiz: updated };
   });
 
   app.post("/teacher/quizzes/:id/reopen", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const body = z.object({ linkExpiresAt: z.string().datetime().optional() }).safeParse(request.body);
-    if (!params.success || !body.success || (body.data.linkExpiresAt && new Date(body.data.linkExpiresAt) <= new Date())) return reply.code(400).send({ error: "invalid_request" });
-    const filters = [eq(quizzes.id, params.data.id), eq(quizzes.status, "inactive")];
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!body.success) return reply.code(400).send(validationError(body.error));
+    if (body.data.linkExpiresAt && new Date(body.data.linkExpiresAt) <= new Date()) return reply.code(400).send({ error: "invalid_link_expiry" });
+    const filters = [eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const [existing] = await db.select().from(quizzes).where(and(...filters)).limit(1);
-    if (!existing || (!body.data.linkExpiresAt && existing.linkExpiresAt && existing.linkExpiresAt <= new Date())) return reply.code(400).send({ error: "invalid_request" });
+    if (!existing) return reply.code(404).send({ error: "not_found" });
+    if (existing.status === "active") return reply.code(409).send({ error: "quiz_already_open" });
+    if (!body.data.linkExpiresAt && existing.linkExpiresAt && existing.linkExpiresAt <= new Date()) return reply.code(400).send({ error: "invalid_link_expiry" });
     const [enabledVariant] = await db.select({ id: quizVariants.id }).from(quizVariants).where(and(eq(quizVariants.quizId, existing.id), eq(quizVariants.active, true), eq(quizVariants.deleted, false))).limit(1);
     if (!enabledVariant) return reply.code(409).send({ error: "no_active_variant" });
-    const [updated] = await db.update(quizzes).set({ status: "active", ...(body.data.linkExpiresAt ? { linkExpiresAt: new Date(body.data.linkExpiresAt) } : {}), updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id, status: quizzes.status, linkExpiresAt: quizzes.linkExpiresAt });
+    const [updated] = await db.update(quizzes).set({ status: "active", ...(body.data.linkExpiresAt ? { linkExpiresAt: new Date(body.data.linkExpiresAt) } : {}), updatedAt: new Date() }).where(and(...filters, eq(quizzes.status, "inactive"))).returning({ id: quizzes.id, status: quizzes.status, linkExpiresAt: quizzes.linkExpiresAt });
     if (!updated) return reply.code(404).send({ error: "not_found" });
     return { quiz: updated };
   });
 
   app.delete("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
-    if (!params.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
     const filters = [eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     const [deleted] = await db.update(quizzes).set({ status: "deleted", updatedAt: new Date() }).where(and(...filters)).returning({ id: quizzes.id });
@@ -262,7 +279,8 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.post("/teacher/quizzes/:id/extend-attempts", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     const body = z.object({ additionalMinutes: z.number().int().min(1).max(1440) }).safeParse(request.body);
-    if (!params.success || !body.success) return reply.code(400).send({ error: "invalid_request" });
+    if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if (!body.success) return reply.code(400).send(validationError(body.error));
     const owner = await db.select({ id: quizzes.id }).from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
     if (!owner.length) return reply.code(404).send({ error: "not_found" });
     await db.update(submissions).set({ dueAt: sql`${submissions.dueAt} + (${body.data.additionalMinutes} * interval '1 minute')` }).where(and(eq(submissions.quizId, params.data.id), isNull(submissions.submittedAt)));

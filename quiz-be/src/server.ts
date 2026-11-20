@@ -1,5 +1,6 @@
 import "./load-env.js";
 import Fastify from "fastify";
+import { registerQuizErrors } from "./api-errors.js";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
@@ -17,6 +18,7 @@ import { catalogRoutes } from "./routes/catalogs.js";
 
 const app = Fastify({ logger: true, trustProxy: true });
 
+registerQuizErrors(app);
 app.decorateRequest("authUser", null);
 await app.register(cookie, { secret: process.env.SESSION_SECRET ?? "local-development-only-secret-change-before-deploy" });
 await app.register(cors, { origin: process.env.WEB_ORIGIN ?? "http://localhost:3000", credentials: true });

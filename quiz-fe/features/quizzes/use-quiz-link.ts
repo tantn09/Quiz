@@ -1,3 +1,4 @@
+import { apiFetch, reportApiError } from "@/lib/api-request";
 import { useErrorToast } from "@/components/ui/toast";
 import { type Dispatch, type FormEvent, type SetStateAction, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
@@ -30,19 +31,20 @@ export function useQuizLink({ load, setDetail, setNotice }: {
     setLinkBusy(true);
     setLinkError("");
     try {
-      const response = await fetch(`/api/teacher/quizzes/${linkQuiz.id}/${linkQuiz.status === "inactive" ? "reopen" : "extend-link"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkExpiresAt: date.toISOString() }) });
-      if (!response.ok) throw new Error();
+      await apiFetch(`/api/teacher/quizzes/${linkQuiz.id}/${linkQuiz.status === "inactive" ? "reopen" : "extend-link"}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ linkExpiresAt: date.toISOString() }) });
       setNotice(linkQuiz.status === "inactive" ? t("Đã mở lại và gia hạn bài kiểm tra.") : t("Đã gia hạn link."));
       setLinkQuiz(null);
       setDetail((current) => current?.quiz.id === linkQuiz.id ? { ...current, quiz: { ...current.quiz, status: "active", linkExpiresAt: date.toISOString() } } : current);
       await load();
-    } catch { showError(t("Không gia hạn được link. Vui lòng thử lại.")); }
+    } catch (error) { reportApiError(error, "Không gia hạn được link. Vui lòng thử lại.", t, showError); }
     finally { setLinkBusy(false); }
   }
 
   async function copyLink(quiz: QuizRow) {
-    await navigator.clipboard.writeText(`${window.location.origin}/q/${quiz.linkToken}`);
-    setNotice(t("Đã sao chép link bài kiểm tra."));
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/q/${quiz.linkToken}`);
+      setNotice(t("Đã sao chép link bài kiểm tra."));
+    } catch (error) { reportApiError(error, "Không sao chép được link.", t, showError); }
   }
 
   return { linkQuiz, setLinkQuiz, newLinkExpiry, setNewLinkExpiry, linkError, setLinkError, linkBusy, openLinkExpiry, extendLink, copyLink };

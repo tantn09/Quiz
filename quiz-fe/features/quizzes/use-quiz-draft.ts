@@ -1,3 +1,5 @@
+import { useTranslation } from "@/lib/i18n";
+import { apiFetch, reportApiError } from "@/lib/api-request";
 import { useErrorToast } from "@/components/ui/toast";
 import { useEffect, useState } from "react";
 import { promptImages, type PromptDocument } from "@/components/prompt-editor";
@@ -14,12 +16,13 @@ type DraftOptions = Omit<SavedDraft, "savedAt"> & {
 
 export function useQuizDraft({ mode, quizId, formOpen, title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions }: DraftOptions) {
   const showError = useErrorToast();
+  const t = useTranslation();
   const [draftOwner, setDraftOwner] = useState<string | null>(null);
   const [draftCandidate, setDraftCandidate] = useState<SavedDraft | null>(null);
   const [draftReady, setDraftReady] = useState(false);
   const [draftStatus, setDraftStatus] = useState("");
   const draftKey = draftOwner && (mode === "create" || mode === "edit" && quizId) ? `quiz-draft:${draftOwner}:${mode === "create" ? "new" : quizId}` : null;
-  useEffect(() => { if (mode !== "create" && mode !== "edit") return; void fetch("/api/auth/me", { cache: "no-store" }).then(async (response) => { if (!response.ok) throw new Error(); setDraftOwner((await response.json()).user.id); }).catch(() => showError("Không tải được thông tin tài khoản để lưu bản nháp.")); }, [mode, showError]);
+  useEffect(() => { if (mode !== "create" && mode !== "edit") return; void apiFetch("/api/auth/me", { cache: "no-store" }).then(async (response) => { setDraftOwner((await response.json()).user.id); }).catch((error) => reportApiError(error, "Không tải được thông tin tài khoản để lưu bản nháp.", t, showError)); }, [mode, showError]);
   useEffect(() => {
     if (!draftKey || !formOpen) return;
     setDraftReady(false);
@@ -41,7 +44,7 @@ export function useQuizDraft({ mode, quizId, formOpen, title, description, promp
       try {
         localStorage.setItem(draftKey, JSON.stringify(draft));
         setDraftStatus("Đã lưu bản nháp");
-        if (promptImages(promptDocument).length) void fetch("/api/teacher/assets/reserve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: promptImages(promptDocument) }) }).then((response) => { if (!response.ok) showError("Đã lưu bản nháp, nhưng chưa giữ được ảnh tạm."); }).catch(() => showError("Đã lưu bản nháp, nhưng chưa giữ được ảnh tạm."));
+        if (promptImages(promptDocument).length) void apiFetch("/api/teacher/assets/reserve", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: promptImages(promptDocument) }) }).catch((error) => reportApiError(error, "Đã lưu bản nháp, nhưng chưa giữ được ảnh tạm.", t, showError));
       } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); }
     }, 800);
     return () => clearTimeout(timer);

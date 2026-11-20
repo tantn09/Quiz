@@ -1,5 +1,6 @@
 "use client";
 
+import { apiFetch, reportApiError } from "@/lib/api-request";
 import { useErrorToast } from "@/components/ui/toast";
 import { useEffect, useRef, useState } from "react";
 import { useEditor, type JSONContent } from "@tiptap/react";
@@ -60,12 +61,11 @@ export function PromptEditor({ value, onChange }: { value: PromptDocument; onCha
     setBusy(true); setError("");
     try {
       const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(",")[1]); reader.onerror = reject; reader.readAsDataURL(pendingFile); });
-      const response = await fetch("/api/teacher/assets", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }) });
-      if (!response.ok) throw new Error();
+      const response = await apiFetch("/api/teacher/assets", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ data }) });
       const { id } = await response.json();
       editor?.chain().focus().setImage({ src: `/api/public/assets/${id}`, alt: alt.trim() }).run();
       setPendingFile(null);
-    } catch { showError(t("Không tải được ảnh đề bài.")); } finally { setBusy(false); }
+    } catch (error) { reportApiError(error, "Không tải được ảnh đề bài.", t, showError); } finally { setBusy(false); }
   }
 
   function saveLink() {
