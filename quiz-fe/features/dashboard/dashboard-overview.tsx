@@ -1,11 +1,10 @@
 "use client";
 
-import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { BarChart3, BookOpenCheck, ClipboardCheck, GraduationCap, UserCheck, Users } from "lucide-react";
-import { DashboardLayout } from "@/components/page-layouts";
+import { DashboardContent, DashboardLoading } from "@/components/dashboard-shell";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
@@ -61,9 +60,9 @@ export function DashboardOverview({ admin }: { admin: boolean }) {
     ["/teacher/students", "Quản lý học sinh"],
   ];
 
-  if (!overview && !failed) return <LoadingScreen />;
+  if (!overview && !failed) return <DashboardLoading />;
 
-  return <DashboardLayout admin={admin}>
+  return <DashboardContent>
     <PageHeader title={t("Tổng quan")} />
     {overview && <>
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -94,5 +93,5 @@ export function DashboardOverview({ admin }: { admin: boolean }) {
           <Button key={href} asChild variant="outline"><Link href={href}>{t(label)}</Link></Button>)}
       </div>
     </Card>
-  </DashboardLayout>;
+  </DashboardContent>;
 }

@@ -1,11 +1,10 @@
 ﻿"use client";
 
-import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
 import { Input } from "@/components/ui/field";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { StudentForm, StudentImport, type Student } from "@/features/students/student-forms";
-import { DashboardLayout } from "@/components/page-layouts";
+import { DashboardContent, DashboardLoading } from "@/components/dashboard-shell";
 import { Alert } from "@/components/ui/alert";
 import { Select } from "@/components/ui/select";
 import { Table } from "@/components/ui/table";
@@ -103,9 +102,9 @@ export default function StudentsPage({ admin }: { admin: boolean }) {
     setDraft(student);
   }
 
-  if (teachersLoading || loadState === "loading") return <LoadingScreen />;
+  if (teachersLoading || loadState === "loading") return <DashboardLoading />;
 
-  return <DashboardLayout admin={admin}>
+  return <DashboardContent>
     <PageHeader title={t("Quản lý học sinh")} description={t("Tìm kiếm, quản lý danh sách lớp và nhập học sinh từ Excel.")} action={
       <div className="flex flex-wrap gap-2">
         <Button type="button" disabled={busy || !canManage} onClick={() => openStudent({ ...blank, className: activeClass })}>{t("Thêm học sinh")}</Button>
@@ -161,5 +160,5 @@ export default function StudentsPage({ admin }: { admin: boolean }) {
       await load();
       setImportOpen(false);
     }} />}
-  </DashboardLayout>;
+  </DashboardContent>;
 }

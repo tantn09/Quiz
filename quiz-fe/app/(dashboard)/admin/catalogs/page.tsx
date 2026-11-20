@@ -1,9 +1,8 @@
 "use client";
 
-import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
 import { type FormEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
-import { DashboardLayout } from "@/components/page-layouts";
+import { DashboardContent, DashboardLoading } from "@/components/dashboard-shell";
 import { Modal } from "@/components/modal";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -105,9 +104,9 @@ export default function CatalogPage() {
     } finally { setBusy(false); }
   }
 
-  if (!catalogs && !loadError) return <LoadingScreen />;
+  if (!catalogs && !loadError) return <DashboardLoading />;
 
-  return <DashboardLayout admin compact>
+  return <DashboardContent compact>
     <PageHeader title={t("Danh mục")} description={t("Quản lý các lựa chọn khi tạo bài kiểm tra và tài khoản giáo viên.")} />
     <section className="mt-7 min-w-0 rounded-2xl border border-line bg-surface p-5 sm:p-6">
       <div role="tablist" aria-label={t("Danh mục")} className="flex flex-wrap gap-2 border-b border-line pb-3">
@@ -159,5 +158,5 @@ export default function CatalogPage() {
         </div>
       </form>
     </Modal>}
-  </DashboardLayout>;
+  </DashboardContent>;
 }

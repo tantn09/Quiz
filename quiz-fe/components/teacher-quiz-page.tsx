@@ -1,11 +1,10 @@
 "use client";
 
-import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
 import { Input, Textarea } from "@/components/ui/field";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { DashboardLayout } from "@/components/page-layouts";
+import { DashboardContent, DashboardLoading } from "@/components/dashboard-shell";
 import { Modal } from "@/components/modal";
 import { useTranslation } from "@/lib/i18n";
 import Link from "next/link";
@@ -286,16 +285,16 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   const contentQuestions = contentVariant?.questions ?? detail?.questions ?? [];
 
   if ((mode === "list" && listLoading) || ((mode === "create" || mode === "edit") && catalogLoading)
-    || (!detailError && (mode === "edit" && !formOpen || mode === "view" && !detail))) return <LoadingScreen />;
+    || (!detailError && (mode === "edit" && !formOpen || mode === "view" && !detail))) return <DashboardLoading />;
 
-  return <DashboardLayout admin={admin} compact={mode === "create"}>
+  return <DashboardContent compact={mode === "create"}>
     {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Excel")}</Button><Button asChild variant="outline"><a href="/api/teacher/quizzes/import-template.xlsx" download>{t("Tải file mẫu")}</a></Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
     {mode !== "list" && <div className={mode === "create" ? "px-[calc(1.25rem+1px)] sm:px-[calc(2rem+1px)]" : undefined}><PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={mode === "create" ? t("Tạo bài kiểm tra mới") : mode === "edit" ? t("Sửa bài kiểm tra") : t("Chi tiết bài kiểm tra")} description={mode === "create" ? t("Điền thông tin, thêm câu hỏi rồi tạo bài kiểm tra.") : undefined} action={<Button asChild variant="outline"><Link href={quizPath}>{t("Về danh sách bài kiểm tra")}</Link></Button>} /></div>}
     <Input ref={importInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importExcel(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
     {mode === "list" && importErrors.length > 0 && <div role="alert" className="mt-5 rounded-xl ds-error p-4 text-sm"><p className="font-semibold">{t("File Excel có lỗi:")}</p><ul className="mt-2 list-disc pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t("dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}
     {notice && <Alert className="mt-5 break-words">{notice}</Alert>}
     {(detailQuiz || mode === "view") && !detailError && <QuizSurface fullPage={mode !== "list"} title={t("Chi tiết bài kiểm tra")} onClose={() => setDetailQuiz(null)}>
-      {!detail && <LoadingScreen />}
+      {!detail && <DashboardLoading />}
       {detail && <div className="space-y-6">
         <header className="rounded-2xl border border-line bg-surface-subtle p-5"><div className="flex flex-wrap items-start justify-between gap-4"><div className="min-w-0"><h2 className="text-2xl font-bold">{detail.quiz.title}</h2><p className="mt-2 text-sm text-content-muted">{detail.quiz.assignedClass ? `Lớp ${detail.quiz.assignedClass} · ` : ""}{detail.quiz.subject ? `${detail.quiz.subject} · ` : ""}{detail.quiz.durationMinutes} phút</p><p className="mt-2 text-sm font-semibold">{detail.quiz.status === "active" ? detail.quiz.linkExpiresAt && new Date(detail.quiz.linkExpiresAt) <= new Date() ? "Link đã hết hạn" : "Đang mở" : "Đã đóng"} · {detail.quiz.linkExpiresAt ? `Hạn link ${formatTimeFirst(detail.quiz.linkExpiresAt)}` : "Link không có hạn"}</p></div><div className="flex w-full flex-wrap gap-2 sm:w-auto">{detail.quiz.status === "active" && (!detail.quiz.linkExpiresAt || new Date(detail.quiz.linkExpiresAt) > new Date()) ? <Button type="button" onClick={() => void copyLink(detail.quiz)}>Sao chép link</Button> : <Button type="button" onClick={() => openLinkExpiry(detail.quiz)}>{detail.quiz.status === "inactive" ? "Mở lại bài kiểm tra" : "Gia hạn link"}</Button>}<Button asChild variant="outline"><Link href={`${resultsPath}?quizId=${detail.quiz.id}${detail.quiz.assignedClass ? `&className=${encodeURIComponent(detail.quiz.assignedClass)}` : ""}`}>Xem kết quả</Link></Button><Button type="button" variant="outline" onClick={() => { setDetailQuiz(null); void edit(detail.quiz); }}>Sửa bài kiểm tra</Button><QuizActions quiz={detail.quiz} t={t} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts} stop={stop} deleteQuiz={deleteQuiz} cloneQuiz={(quiz) => { setCloneSource(quiz); setCloneClass(""); }} /></div></div></header>
         <div role="tablist" aria-label="Nội dung chi tiết bài kiểm tra" className="flex gap-2 overflow-x-auto border-b border-line pb-3"><button type="button" role="tab" aria-selected={detailTab === "overview"} onClick={() => setDetailTab("overview")} className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-focus ${detailTab === "overview" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Tổng quan</button><button type="button" role="tab" aria-selected={detailTab === "content"} onClick={() => void showContent()} className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-focus ${detailTab === "content" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Nội dung</button><button type="button" role="tab" aria-selected={detailTab === "variants"} onClick={() => setDetailTab("variants")} className={`min-h-11 shrink-0 rounded-xl px-4 py-2 text-sm font-semibold focus-visible:ring-2 focus-visible:ring-focus ${detailTab === "variants" ? "bg-brand text-brand-foreground" : "border border-line"}`}>Mã đề</button></div>
@@ -344,5 +343,5 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     {mode === "list" && <QuizList quizzes={quizzes} search={search} setSearch={setSearch} status={status} setStatus={setStatus}
       openDetail={openDetail} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts}
       stop={stop} deleteQuiz={deleteQuiz} cloneQuiz={(quiz) => { setCloneSource(quiz); setCloneClass(""); }} />}
-  </DashboardLayout>;
+  </DashboardContent>;
 }

@@ -2,7 +2,7 @@
 
 import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
-import { NativeSelect } from "@/components/ui/field";
+import { Select } from "@/components/ui/select";
 import { useEffect, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 
@@ -48,15 +48,31 @@ export function TeacherCatalogFields({ registration = false, manageCatalogs = fa
 
   return <>
     {fields.map(({ name, label, placeholder, current, options }) => <div key={name}>
-      <label className="block text-sm font-medium">{t(label)}
-        <NativeSelect name={name} defaultValue={current} className="mt-2 min-h-11 w-full rounded-xl border border-line bg-surface px-4 py-2">
-          <option value="">{t(placeholder)}</option>
-          {current && !options?.some((item) => item.name === current) && <option key={current} value={current}>{current}</option>}
-          {options?.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-        </NativeSelect>
-      </label>
+      <CatalogSelect key={current} name={name} label={t(label)} placeholder={t(placeholder)} current={current} items={options ?? []} />
       {options?.length === 0 && <p className="mt-1 text-xs text-content-muted">{t("Danh mục chưa có lựa chọn.")} {manageCatalogs && <a className="text-brand underline" href="/admin/catalogs">{t("Quản lý danh mục")}</a>}</p>}
     </div>)}
     {!catalogs && !failed && <LoadingScreen />}
+  </>;
+}
+
+
+function CatalogSelect({ name, label, placeholder, current, items }: {
+  name: string;
+  label: string;
+  placeholder: string;
+  current: string;
+  items: CatalogItem[];
+}) {
+  const [value, setValue] = useState(current);
+  const options = [
+    { value: "", label: placeholder },
+    ...(current && !items.some((item) => item.name === current) ? [{ value: current, label: current }] : []),
+    ...items.map((item) => ({ value: item.name, label: item.name })),
+  ];
+
+  return <>
+    <span className="block text-sm font-medium">{label}</span>
+    <Select value={value} onValueChange={setValue} ariaLabel={label} options={options} className="mt-2" />
+    <input type="hidden" name={name} value={value} />
   </>;
 }

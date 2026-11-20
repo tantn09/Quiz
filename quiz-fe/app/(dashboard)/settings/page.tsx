@@ -1,10 +1,9 @@
 ﻿"use client";
 
-import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
-import { FormEvent, useEffect, useEffectEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { DashboardLayout } from "@/components/page-layouts";
+import { DashboardContent, DashboardLoading } from "@/components/dashboard-shell";
 import { applyLanguage, useTranslation } from "@/lib/i18n";
 import { PageHeader } from "@/components/ui/page-header";
 import { TeacherCatalogFields } from "@/components/teacher-catalog-fields";
@@ -28,7 +27,8 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const reportLoadError = useEffectEvent(() => showError(t("Không tải được thông tin tài khoản.")));
+  const translate = useRef(t);
+  useEffect(() => { translate.current = t; }, [t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -41,12 +41,12 @@ export default function SettingsPage() {
       localStorage.setItem("quiz-theme", user.theme);
       document.documentElement.dataset.theme = user.theme;
     }).catch(() => {
-      if (!controller.signal.aborted) reportLoadError();
+      if (!controller.signal.aborted) showError(translate.current("Không tải được thông tin tài khoản."));
     }).finally(() => {
       if (!controller.signal.aborted) setInitialLoading(false);
     });
     return () => controller.abort();
-  }, []);
+  }, [showError]);
 
   async function updatePreferences(next: { language?: Profile["language"]; theme?: Profile["theme"] }) {
     if (!profile || preferencesBusy || (next.language ?? profile.language) === profile.language && (next.theme ?? profile.theme) === profile.theme) return;
@@ -106,9 +106,9 @@ export default function SettingsPage() {
     setDialog(null);
   }
 
-  if (initialLoading) return <LoadingScreen />;
+  if (initialLoading) return <DashboardLoading />;
 
-  return <DashboardLayout compact admin={profile ? profile.role === "admin" : undefined}>
+  return <DashboardContent compact>
     <PageHeader title={t("Cài đặt")} />
     {profile && <div className="mt-6 grid items-start gap-4 lg:grid-cols-[1.2fr_1fr]">
       <section className="min-w-0 rounded-2xl border border-line bg-surface p-5">
@@ -182,5 +182,5 @@ export default function SettingsPage() {
         </div>
       </form>
     </Modal>}
-  </DashboardLayout>;
+  </DashboardContent>;
 }

@@ -1,11 +1,10 @@
 "use client";
 
-import { LoadingScreen } from "@/components/ui/loading-screen";
 import { useErrorToast } from "@/components/ui/toast";
 import { Table } from "@/components/ui/table";
 import { Input } from "@/components/ui/field";
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { DashboardLayout } from "@/components/page-layouts";
+import { DashboardContent, DashboardLoading } from "@/components/dashboard-shell";
 import { Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
 import { TeacherCatalogFields } from "@/components/teacher-catalog-fields";
@@ -97,9 +96,9 @@ export default function TeachersPage() {
     else showError(t("Không đặt lại được mật khẩu. Mật khẩu cần ít nhất 10 ký tự."));
   }
 
-  if (initialLoading) return <LoadingScreen />;
+  if (initialLoading) return <DashboardLoading />;
 
-  return <DashboardLayout admin>
+  return <DashboardContent>
     <PageHeader title={t("Quản lý giáo viên")} description={t("Tạo tài khoản, tìm kiếm và quản lý quyền truy cập.")} action={<Button type="button" onClick={() => { setFormOpen(true); }}>{t("Thêm giáo viên")}</Button>} />
     {message && <Alert className="mt-4">{message}</Alert>}
     {formOpen && <Modal title={t("Thêm giáo viên")} closeLabel={t("Đóng")} onClose={() => { if (!busy) { setFormOpen(false); } }}><form onSubmit={create} className="grid gap-4">
@@ -122,5 +121,5 @@ export default function TeachersPage() {
       <div className="flex flex-col gap-3 sm:flex-row"><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("Tìm theo tên hoặc tài khoản")} className="min-w-0 flex-1 rounded-xl border border-line px-4 py-3" /><Select value={status} onValueChange={setStatus} ariaLabel={t("Tất cả trạng thái")} options={[{ value: "", label: t("Tất cả trạng thái") }, { value: "pending", label: t("Chờ duyệt") }, { value: "active", label: t("Đang hoạt động") }, { value: "locked", label: t("Đã khóa") }]} className="sm:w-56" /></div>
       <div className="mt-5"><Table className="w-full min-w-[820px] text-left text-sm"><thead><tr><th scope="col">{t("Giáo viên")}</th><th scope="col">{t("Tài khoản")}</th><th scope="col">{t("Email")}</th><th scope="col">{t("Bộ môn")}</th><th scope="col">{t("Trạng thái")}</th><th scope="col">{t("Thao tác")}</th></tr></thead><tbody>{teachers.map((teacher) => <tr key={teacher.id} className="border-b border-line"><td className="py-4 font-medium">{teacher.displayName}<span className="block text-xs text-content-muted">{teacher.workplace}</span></td><td className="py-4">{teacher.username}</td><td className="py-4">{teacher.email}</td><td className="py-4">{teacher.subject}</td><td className="py-4">{teacher.status === "pending" ? t("Chờ duyệt") : teacher.status === "active" ? t("Đang hoạt động") : t("Đã khóa")}</td><td className="py-4"><div className="flex gap-2"><button onClick={() => { setEditing(teacher); }} className="rounded-lg border border-line px-3 py-2">{t("Sửa")}</button><button onClick={() => void setLocked(teacher)} className="rounded-lg border border-line px-3 py-2">{teacher.status === "pending" ? t("Duyệt") : teacher.status === "active" ? t("Khóa") : t("Mở khóa")}</button>{teacher.status === "pending" && <button onClick={() => void rejectTeacher(teacher)} className="rounded-lg border border-line px-3 py-2">{t("Từ chối")}</button>}<button onClick={() => void resetPassword(teacher)} className="rounded-lg border border-line px-3 py-2">{t("Đặt mật khẩu")}</button></div></td></tr>)}{teachers.length === 0 && <tr><td colSpan={6} className="py-10 text-center text-content-muted">{t("Chưa có giáo viên phù hợp.")}</td></tr>}</tbody></Table></div>
     </section>
-  </DashboardLayout>;
+  </DashboardContent>;
 }

@@ -31,7 +31,9 @@ export async function middleware(request: NextRequest) {
       url.pathname = destination;
       return NextResponse.redirect(url);
     }
-    return NextResponse.next();
+    const headers = new Headers(request.headers);
+    headers.set("x-dashboard-role", user.role);
+    return NextResponse.next({ request: { headers } });
   } catch {
     return NextResponse.redirect(new URL("/login", request.url));
   }

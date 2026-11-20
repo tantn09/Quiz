@@ -7,27 +7,9 @@ import { useEffect, useState } from "react";
 import { BarChart3, BookOpenCheck, DoorOpen, GraduationCap, LayoutDashboard, Menu, Settings, Users, X } from "lucide-react";
 import { useTranslation } from "@/lib/i18n";
 
-type DashboardNavProps = { admin?: boolean };
-
-export function DashboardNav({ admin: knownAdmin }: DashboardNavProps) {
+export function DashboardNav({ admin }: { admin: boolean }) {
   const showError = useErrorToast();
   const t = useTranslation();
-  const [sessionAdmin, setSessionAdmin] = useState<boolean>();
-  const admin = knownAdmin ?? sessionAdmin;
-
-  useEffect(() => {
-    if (knownAdmin !== undefined) return;
-    const controller = new AbortController();
-    fetch("/api/auth/me", { cache: "no-store", signal: controller.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error();
-        const { user } = await response.json();
-        if (!controller.signal.aborted && (user.role === "admin" || user.role === "teacher")) setSessionAdmin(user.role === "admin");
-      })
-      .catch(() => { if (!controller.signal.aborted) showError(t("Không tải được thông tin tài khoản.")); });
-    return () => controller.abort();
-  }, [knownAdmin, showError, t]);
-
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -64,14 +46,12 @@ export function DashboardNav({ admin: knownAdmin }: DashboardNavProps) {
 
   const itemClass = "flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-content-muted transition-colors hover:bg-surface-subtle hover:text-content aria-[current=page]:bg-surface-accent aria-[current=page]:font-semibold aria-[current=page]:text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500";
   const links = [
-    ...(admin !== undefined ? [{ href: admin ? "/admin" : "/teacher", label: t("Tổng quan"), icon: LayoutDashboard }] : []),
+    { href: admin ? "/admin" : "/teacher", label: t("Tổng quan"), icon: LayoutDashboard },
     ...(admin ? [{ href: "/admin/teachers", label: t("Giáo viên"), icon: Users }] : []),
     ...(admin ? [{ href: "/admin/catalogs", label: t("Danh mục"), icon: GraduationCap }] : []),
-    ...(admin === undefined ? [] : [
       { href: admin ? "/admin/quiz" : "/teacher/quiz", label: t("Bài kiểm tra"), icon: BookOpenCheck },
       { href: admin ? "/admin/students" : "/teacher/students", label: t("Học sinh"), icon: Users },
       { href: admin ? "/admin/results" : "/teacher/results", label: t("Kết quả"), icon: BarChart3 },
-    ]),
     { href: "/settings", label: t("Cài đặt"), icon: Settings },
   ];
 
@@ -105,7 +85,7 @@ export function DashboardNav({ admin: knownAdmin }: DashboardNavProps) {
         <button type="button" onClick={() => setOpen(false)} aria-label={t("Đóng menu")} className="flex h-10 w-10 items-center justify-center rounded-lg text-content-muted hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:hidden"><X size={20} aria-hidden="true" /></button>
       </div>
 
-      <p className="mb-2 mt-9 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{admin === undefined ? "" : t(admin ? "Quản trị" : "Giáo viên")}</p>
+      <p className="mb-2 mt-9 px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">{t(admin ? "Quản trị" : "Giáo viên")}</p>
       <nav className="flex flex-col gap-1" aria-label={t("Điều hướng chính")}>
         {links.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/admin" && href !== "/teacher" && pathname.startsWith(`${href}/`));
