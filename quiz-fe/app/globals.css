@@ -163,18 +163,17 @@ html[data-theme="dark"] select:not(.quiz-select-trigger) { background-image: url
 .quiz-editor .mantine-RichTextEditor-control:not(:disabled):hover,
 .quiz-editor-dialog-header .quiz-editor-dialog-close:not(:disabled):hover,
 .quiz-editor-menu .mantine-Menu-item:not([data-disabled]):is(:hover, [data-hovered]),
-.quiz-picker-option:hover,
-.quiz-answer-choice:hover {
+.quiz-picker-option:hover {
   border-color: var(--primary);
   background: var(--surface-subtle);
 }
 .quiz-editor .mantine-RichTextEditor-control[data-active],
-.quiz-picker-option[aria-pressed="true"],
-.quiz-answer-choice:has(:checked) {
+.quiz-picker-option[aria-pressed="true"] {
   border-color: var(--primary);
   background: var(--surface-accent);
   color: var(--primary);
 }
+.quiz-answer-choice:has(:checked) { color: var(--primary); }
 .quiz-editor .mantine-RichTextEditor-control:disabled,
 .quiz-editor-dialog-close:disabled { opacity: .5; cursor: not-allowed; }
 .quiz-editor .mantine-RichTextEditor-control:focus-visible,
@@ -223,7 +222,7 @@ main[id="page-content"] > div > :is(section, form).rounded-2xl { box-shadow: 0 1
 main[id="page-content"] .ds-card :is(input, textarea, select), main[id="page-content"] .bg-surface :is(input, textarea, select) { background: var(--surface); }
 fieldset { background: color-mix(in srgb, var(--surface) 84%, transparent); }
 fieldset:has(input:checked) { border-color: var(--primary); }
-label:has(> input[type="radio"]:checked) { border-color: var(--primary); background: var(--surface-accent); }
+label:not(.quiz-answer-choice):has(> input[type="radio"]:checked) { border-color: var(--primary); background: var(--surface-accent); }
 label:has(> input[type="radio"]:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 table { border-collapse: separate; border-spacing: 0; }
 thead { background: var(--surface-subtle); }

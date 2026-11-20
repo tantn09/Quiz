@@ -142,7 +142,7 @@ export function QuestionEditor({ question, index, count, collapsed, toggle, erro
         {question.options.map((option, optionIndex) => {
           const letter = String.fromCharCode(65 + optionIndex);
           return <div key={optionIndex} className="flex items-center gap-2">
-            <label className="quiz-answer-choice flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 text-sm font-semibold" title={t("Đáp án đúng")}>
+            <label className="quiz-answer-choice flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-xl px-1 text-sm font-semibold" title={t("Đáp án đúng")}>
               <input type="radio" name={`correct-option-${question.id}`} checked={question.correctOption === optionIndex} onChange={() => update({ correctOption: optionIndex })} className="size-4 accent-brand" aria-label={`${t("Chọn đáp án đúng")}: ${letter}`} />
               <span>{letter}</span>
             </label>
