@@ -5,7 +5,7 @@ const messages: Record<string, string> = {
   "invalid_image": "Dữ liệu ảnh không hợp lệ.",
   "invalid_image_size": "Ảnh phải có kích thước tối đa 5 MB.",
   "invalid_image_type": "Hãy chọn ảnh PNG, JPEG hoặc WebP.",
-  "import_invalid": "File Excel có lỗi. Hãy kiểm tra danh sách lỗi.",
+  "import_invalid": "File nhập có lỗi. Hãy kiểm tra danh sách lỗi.",
   "not_found": "Không tìm thấy dữ liệu yêu cầu.",
   "variant_not_found": "Mã đề nguồn không còn tồn tại. Hãy chọn mã khác.",
   "last_active_variant": "Hãy bật một mã đề khác trước khi tắt mã đang hoạt động cuối cùng.",

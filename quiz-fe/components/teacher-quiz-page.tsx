@@ -135,7 +135,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
           setExpiresAt(draft.linkExpiresAt ? localDateTime(new Date(draft.linkExpiresAt)) : "");
           setQuestions(draft.questions.map((question) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, points: question.points, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1 })));
           setCollapsedQuestionIds(new Set());
-        } catch (error) { reportApiError(error, "Không đọc được file Excel.", t, showError); }
+        } catch (error) { reportApiError(error, "Không đọc được file nhập.", t, showError); }
       }
       setFormOpen(true); return;
     }
@@ -161,9 +161,9 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     setQuestions((current) => current.map((question, i) => i === index ? { ...question, ...changes } : question));
   }
 
-  async function importExcel(file: File | undefined) {
+  async function importFile(file: File | undefined) {
     if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".xlsx") || file.size > 2_000_000) { setImportErrors([{ sheet: "File", row: 0, column: "file", message: t("Chỉ nhận file .xlsx tối đa 2 MB.") }]); return; }
+    if (!/\.(docx|xlsx)$/i.test(file.name) || file.size > 2_000_000) { setImportErrors([{ sheet: "File", row: 0, column: "file", message: t("Chỉ nhận file .docx hoặc .xlsx tối đa 2 MB.") }]); return; }
     setImportBusy(true); setImportErrors([]);
     try {
       const { draft } = await previewQuizImport(file);
@@ -177,7 +177,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     } catch (error) {
       const issues = error instanceof ApiError ? error.payload.errors : undefined;
       if (Array.isArray(issues)) setImportErrors(issues);
-      reportApiError(error, "Không đọc được file Excel.", t, showError);
+      reportApiError(error, "Không đọc được file nhập.", t, showError);
     }
     finally { setImportBusy(false); }
   }
@@ -338,10 +338,10 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     || (!detailError && (mode === "edit" && !formOpen || mode === "view" && !detail))) return <DashboardLoading />;
 
   return <DashboardContent compact={mode === "create"}>
-    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Excel")}</Button><Button type="button" variant="outline" onClick={() => void downloadTemplate()}>{t("Tải file mẫu")}</Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
+    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Word hoặc Excel")}</Button><Button type="button" variant="outline" onClick={() => void downloadTemplate()}>{t("Tải Excel mẫu")}</Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
     {mode !== "list" && <div className={mode === "create" ? "px-[calc(1.25rem+1px)] sm:px-[calc(2rem+1px)]" : undefined}><PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={mode === "create" ? t("Tạo bài kiểm tra mới") : mode === "edit" ? t("Sửa bài kiểm tra") : t("Chi tiết bài kiểm tra")} description={mode === "create" ? t("Điền thông tin, thêm câu hỏi rồi tạo bài kiểm tra.") : undefined} action={<Button asChild variant="outline"><Link href={quizPath}>{t("Về danh sách bài kiểm tra")}</Link></Button>} /></div>}
-    <Input ref={importInputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importExcel(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
-    {mode === "list" && importErrors.length > 0 && <div role="alert" className="mt-5 rounded-xl ds-error p-4 text-sm"><p className="font-semibold">{t("File Excel có lỗi:")}</p><ul className="mt-2 list-disc pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t("dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}
+    <Input ref={importInputRef} type="file" accept=".docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importFile(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
+    {mode === "list" && importErrors.length > 0 && <div role="alert" className="mt-5 rounded-xl ds-error p-4 text-sm"><p className="font-semibold">{t("File nhập có lỗi:")}</p><ul className="mt-2 list-disc pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t(issue.sheet === "Word" ? "đoạn" : "dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}
     {notice && <Alert className="mt-5 break-words">{notice}</Alert>}
     {(detailQuiz || mode === "view") && !detailError && <QuizSurface fullPage={mode !== "list"} title={t("Chi tiết bài kiểm tra")} onClose={() => setDetailQuiz(null)}>
       {!detail && <DashboardLoading />}

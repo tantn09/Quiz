@@ -3,8 +3,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { quizInput } from "./quizzes.js";
-
-type ImportError = { sheet: string; row: number; column: string; message: string };
+import { previewWordImport, type ImportError } from "./quiz-import-word.js";
 const quizFields = ["title", "description", "durationMinutes", "linkExpiresAt", "promptText"] as const;
 const questionColumns = ["type", "prompt", "points", ...Array.from({ length: 8 }, (_, i) => `option${i + 1}`), "correctOption"];
 const uploadBody = z.object({ filename: z.string(), data: z.string().max(2_800_000) });
@@ -59,9 +58,14 @@ export async function quizImportRoutes(app: FastifyInstance): Promise<void> {
 
   app.post("/teacher/quizzes/import-preview", { preHandler: [requireTeacherAccess], bodyLimit: 3_000_000 }, async (request, reply) => {
     const body = uploadBody.safeParse(request.body);
-    if (!body.success || !body.data.filename.toLowerCase().endsWith(".xlsx")) return reply.code(400).send({ errors: [{ sheet: "File", row: 0, column: "file", message: "Chỉ nhận file .xlsx tối đa 2 MB." }] });
+    if (!body.success || !/\.(docx|xlsx)$/i.test(body.data.filename)) return reply.code(400).send({ errors: [{ sheet: "File", row: 0, column: "file", message: "Chỉ nhận file .docx hoặc .xlsx tối đa 2 MB." }] });
+    const word = /\.docx$/i.test(body.data.filename);
     const bytes = Buffer.from(body.data.data, "base64");
-    if (bytes.length > 2_000_000 || bytes.length < 4 || bytes.toString("ascii", 0, 2) !== "PK") return reply.code(400).send({ errors: [{ sheet: "File", row: 0, column: "file", message: "File .xlsx không hợp lệ hoặc quá 2 MB." }] });
+    if (bytes.length > 2_000_000 || bytes.length < 4 || bytes.toString("ascii", 0, 2) !== "PK") return reply.code(400).send({ errors: [{ sheet: "File", row: 0, column: "file", message: word ? "File .docx không hợp lệ hoặc quá 2 MB." : "File .xlsx không hợp lệ hoặc quá 2 MB." }] });
+    if (word) {
+      const preview = await previewWordImport(bytes, body.data.filename);
+      return preview.errors ? reply.code(400).send(preview) : preview;
+    }
     const workbook = new ExcelJS.Workbook();
     try { await workbook.xlsx.load(bytes as unknown as Parameters<typeof workbook.xlsx.load>[0]); }
     catch { return reply.code(400).send({ errors: [{ sheet: "File", row: 0, column: "file", message: "Không đọc được file .xlsx." }] }); }
