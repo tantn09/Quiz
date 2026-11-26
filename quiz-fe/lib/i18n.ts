@@ -3,6 +3,36 @@
 import { useCallback, useEffect, useState } from "react";
 
 const english: Record<string, string> = {
+  "Chưa nộp": "Not submitted",
+  "Hủy": "Cancel",
+  "Không cập nhật được yêu cầu làm bài.": "Could not update the access request.",
+  "Không thể xóa bài.": "Could not delete the submission.",
+  "Không tải được danh sách lớp.": "Could not load the class roster.",
+  "Mã đề": "Version",
+  "Xuất Excel": "Export to Excel",
+  "Xác nhận xóa": "Confirm deletion",
+  "bài kiểm tra": "quiz",
+  "Chưa có bài đã nộp.": "No submitted attempts yet.",
+  "Chưa có bài đang chờ nộp.": "No attempts in progress.",
+  "Không thể đặt lại mật khẩu. Hãy thử lại.": "Could not reset the password. Try again.",
+  "Đã hết giờ làm bài.": "Time is up.",
+  "Không thể lưu trên trình duyệt. Hãy giữ trang này mở.": "This browser could not save your work. Keep this page open.",
+  "Đang gửi bài…": "Submitting…",
+  "Đang chờ gửi lại bài.": "Waiting to retry submission.",
+  "Không gửi được bài làm.": "Could not submit your work.",
+  "Thử gửi lại": "Retry submission",
+  "Tùy chọn kết quả": "Result options",
+  "Chưa có lớp hoặc bài làm.": "No classes or attempts yet.",
+  "Đang làm": "In progress",
+  "Xem bài làm": "View attempts",
+  "Đang mở…": "Opening…",
+  "Xóa bài": "Delete submission",
+  "Xóa bài đã nộp": "Delete submission",
+  "Xóa các bài đã nộp": "Delete submitted attempts",
+  "Đã xóa bài đã nộp.": "Submitted attempts deleted.",
+  "Xóa bài đã nộp của lớp {class} trong bài kiểm tra “{quiz}”?": "Delete the submission from class {class} for “{quiz}”?",
+  "Xóa {count} bài đã nộp của lớp {class} trong bài kiểm tra “{quiz}”?": "Delete {count} submissions from class {class} for “{quiz}”?",
+  "Các bài đang làm dở được giữ nguyên. Không thể khôi phục bài đã xóa.": "In-progress attempts are kept. Deleted submissions cannot be recovered.",
   "Cộng thời gian làm": "Add time to active attempts",
   "Cộng thêm cho mọi lượt chưa nộp. Lượt đã nộp và thời lượng của lượt mới không đổi.": "Add time to all unsubmitted attempts. Submitted attempts and the duration of new attempts stay unchanged.",
   "Số phút cộng thêm": "Additional minutes",
@@ -469,7 +499,10 @@ const english: Record<string, string> = {
 export function useLocale() {
   const [language, setLanguage] = useState<"vi" | "en">("vi");
   useEffect(() => {
-    const update = () => setLanguage(localStorage.getItem("quiz-language") === "en" ? "en" : "vi");
+    const update = () => {
+      try { setLanguage(localStorage.getItem("quiz-language") === "en" ? "en" : "vi"); }
+      catch { setLanguage("vi"); }
+    };
     update();
     window.addEventListener("quiz-language-change", update);
     window.addEventListener("storage", update);

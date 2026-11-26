@@ -1,5 +1,5 @@
 import { useErrorToast } from "@/components/ui/toast";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "@/lib/i18n";
 import { Modal } from "@/components/modal";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,10 @@ export function useGradingDialog(load: () => Promise<void>, setNotice: (message:
   const [grade, setGrade] = useState("");
   const [gradeError, setGradeError] = useState("");
   const [grading, setGrading] = useState(false);
+  const [openingId, setOpeningId] = useState<string | null>(null);
+  const openRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => openRequest.current?.abort(), []);
+
   function move(data: Detail, next: number) {
     const question = data.submission.questionSnapshot[next];
     setIndex(next);
@@ -30,10 +34,15 @@ export function useGradingDialog(load: () => Promise<void>, setNotice: (message:
   }
 
   async function openResult(id: string) {
+    openRequest.current?.abort();
+    const controller = new AbortController();
+    openRequest.current = controller;
+    setOpeningId(id);
     try {
-      const response = await fetch(`/api/teacher/results/${id}`, { cache: "no-store" });
+      const response = await fetch(`/api/teacher/results/${id}`, { cache: "no-store", signal: controller.signal });
       if (!response.ok) throw new Error();
       const data = await response.json() as Detail;
+      if (controller.signal.aborted) return;
       setDetail(data);
       move(data, Math.max(0, ungraded(data)));
     } catch { showError(t("Không mở được bài nộp.")); }
@@ -43,7 +52,7 @@ export function useGradingDialog(load: () => Promise<void>, setNotice: (message:
   const answer = detail?.answers.find((entry) => entry.questionId === question?.id);
   async function saveGrade(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!detail || question?.type !== "essay" || grade.trim() === "") return;
+    if (grading || !detail || question?.type !== "essay" || grade.trim() === "") return;
     const awardedPoints = Number(grade.replace(",", "."));
     if (!/^\d+(?:[.,]\d{1,2})?$/.test(grade.trim()) || !Number.isInteger(awardedPoints * 4) || awardedPoints < 0 || awardedPoints > question.points) {
       setGradeError(t("Nhập điểm theo bước 0.25 và trong giới hạn của câu."));
@@ -68,7 +77,7 @@ export function useGradingDialog(load: () => Promise<void>, setNotice: (message:
     finally { setGrading(false); }
   }
 
-  const gradingDialog = detail && question && <Modal title={detail.submission.studentName + " · " + detail.submission.studentClass} onClose={() => !grading && setDetail(null)}>
+  const gradingDialog = detail && question && <Modal closeLabel={t("Đóng")} title={detail.submission.studentName + " · " + detail.submission.studentClass} onClose={() => !grading && setDetail(null)}>
       <p aria-live="polite" className="mb-4 text-sm text-content-muted">{detail.submission.quizTitle} · {t("Mã đề")} {detail.submission.variantCode} · {detail.submission.score ?? "—"}/{detail.submission.maxScore}</p>
       <form onSubmit={saveGrade} className="space-y-4">
         <h3 id="grading-question" tabIndex={-1} className="font-semibold">{t("Câu")} {index + 1}/{detail.submission.questionSnapshot.length} · {question.points} {t("điểm")}</h3>
@@ -87,5 +96,12 @@ export function useGradingDialog(load: () => Promise<void>, setNotice: (message:
         </div>
       </form>
     </Modal>;
-  return { openResult, closeResult: () => setDetail(null), gradingDialog };
+  function closeResult() {
+    openRequest.current?.abort();
+    openRequest.current = null;
+    setOpeningId(null);
+    setDetail(null);
+  }
+
+  return { openingId, openResult, closeResult, gradingDialog };
 }

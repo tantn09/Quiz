@@ -5,8 +5,11 @@ import { useEffect } from "react";
 export function ThemeBootstrap() {
   useEffect(() => {
     const applyPreferences = () => {
-      const theme = localStorage.getItem("quiz-theme");
-      const language = localStorage.getItem("quiz-language");
+      let theme: string | null, language: string | null;
+      try {
+        theme = localStorage.getItem("quiz-theme");
+        language = localStorage.getItem("quiz-language");
+      } catch { return; }
       if (theme === "light" || theme === "dark") document.documentElement.dataset.theme = theme;
       if (language === "vi" || language === "en") {
         document.documentElement.lang = language;

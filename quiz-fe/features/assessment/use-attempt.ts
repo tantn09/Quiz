@@ -9,6 +9,18 @@ export type QuizInfo = { title: string; description: string; promptDocument?: JS
 type Attempt = { id: string; dueAt: string; submitted: boolean; variantCode?: number };
 type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean };
 
+const retryDelays = [2000, 5000, 10000];
+
+function readStorage(key: string) {
+  try { return localStorage.getItem(key); }
+  catch { return null; }
+}
+
+function saveAttempt(key: string, state: SavedState) {
+  try { localStorage.setItem(key, JSON.stringify(state)); return true; }
+  catch { return false; }
+}
+
 export function useAttempt() {
   const t = useTranslation();
   const showError = useErrorToast();
@@ -24,11 +36,14 @@ export function useAttempt() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const [pending, setPending] = useState(false);
+  const [finalized, setFinalized] = useState<SavedState | null>(null);
+  const [submissionStatus, setSubmissionStatus] = useState<"sending" | "waiting" | "retry" | "failed" | "sent">("waiting");
+  const [persisted, setPersisted] = useState(true);
+  const retrySubmissionRef = useRef<() => void>(() => {});
 
   const latestAnswers = useRef<Record<string, string>>({});
   const activeSave = useRef<string | null>(null);
-  const submitting = useRef(false);
+  const finalizedRef = useRef(false);
   const acknowledged = useRef<Record<string, string>>({});
   const saveFailure = useRef(false);
   const storageKey = useMemo(() => `quiz-attempt:${token}`, [token]);
@@ -49,7 +64,10 @@ export function useAttempt() {
     setName(state.studentName ?? "");
     setClassName(state.studentClass ?? "");
     setDone(Boolean(payload.attempt.submitted || state.finalized));
-    setPending(Boolean(state.finalized && !payload.attempt.submitted));
+    if (state.finalized && !payload.attempt.submitted && !finalizedRef.current) {
+      finalizedRef.current = true;
+      setFinalized(state);
+    }
     return true;
   }, [t]);
 
@@ -60,7 +78,7 @@ export function useAttempt() {
     const initialize = async () => {
       retryOnReconnect = false;
       try {
-        const local = localStorage.getItem(storageKey);
+        const local = readStorage(storageKey);
         if (local) {
           let state: SavedState | undefined;
           try { state = JSON.parse(local) as SavedState; }
@@ -68,7 +86,7 @@ export function useAttempt() {
           if (state && await loadAttempt(state, signal)) return;
           if (signal.aborted) return;
           showError(t("Không thể khôi phục bài làm trên máy chủ."));
-          localStorage.removeItem(storageKey);
+          try { localStorage.removeItem(storageKey); } catch { /* Storage may be unavailable. */ }
         }
         const response = await fetch(`/api/public/quizzes/${encodeURIComponent(token)}?view=entry`, { cache: "no-store", signal });
         if (!response.ok) throw new Error(t("Link bài kiểm tra đã hết hạn hoặc không tồn tại."));
@@ -94,34 +112,18 @@ export function useAttempt() {
     };
   }, [loadAttempt, storageKey, token, showError, t]);
 
-  const submit = useCallback(async (finalAnswers: Record<string, string>) => {
-    if (!saved || done || submitting.current) return;
-    submitting.current = true;
+  const submitLatest = useCallback(() => {
+    if (!saved || done || finalizedRef.current) return;
+    finalizedRef.current = true;
+    const state = { ...saved, answers: latestAnswers.current, finalized: true };
+    setPersisted(saveAttempt(storageKey, state));
     setDone(true);
-    setPending(true);
-    localStorage.setItem(storageKey, JSON.stringify({ ...saved, answers: finalAnswers, finalized: true }));
-    const body = JSON.stringify({ answers: finalAnswers });
-    try {
-      const response = await fetch(`/api/public/attempts/${saved.attemptId}/submit`, {
-        method: "POST", headers: { "content-type": "application/json", "x-resume-token": saved.resumeToken }, body,
-      });
-      if (response.ok || response.status === 409) {
-        setPending(false);
-        return;
-      }
-      showError(t("Bài sẽ được gửi khi có kết nối mạng."));
-    } catch {
-      showError(t("Bài sẽ được gửi khi có kết nối mạng."));
-    } finally {
-      submitting.current = false;
-    }
-  }, [done, saved, storageKey, t, showError]);
-
-  const submitLatest = useCallback(() => { void submit(latestAnswers.current); }, [submit]);
+    setFinalized(state);
+  }, [done, saved, storageKey]);
 
   useEffect(() => {
-    if (!saved || done) return;
-    localStorage.setItem(storageKey, JSON.stringify({ ...saved, answers }));
+    if (!saved || done || finalizedRef.current) return;
+    saveAttempt(storageKey, { ...saved, answers });
   }, [answers, done, saved, storageKey]);
 
   useEffect(() => {
@@ -129,7 +131,7 @@ export function useAttempt() {
     let active = true;
     let closed = false;
     const sync = () => {
-      if (closed || submitting.current || activeSave.current === saved.attemptId || !navigator.onLine) return;
+      if (closed || finalizedRef.current || activeSave.current === saved.attemptId || !navigator.onLine) return;
       const changes = Object.fromEntries(Object.entries(latestAnswers.current).filter(([id, value]) => acknowledged.current[id] !== value));
       if (!Object.keys(changes).length) return;
       activeSave.current = saved.attemptId;
@@ -158,25 +160,67 @@ export function useAttempt() {
   }, [done, saved, showError, t]);
 
   useEffect(() => {
-    if (!saved || !pending) return;
-    const retry = () => {
-      if (submitting.current) return;
-      const local = localStorage.getItem(storageKey);
-      if (!local) return;
-      const state = JSON.parse(local) as SavedState;
-      if (state.finalized && state.answers && state.attemptId === saved.attemptId) {
-        submitting.current = true;
-        void fetch(`/api/public/attempts/${saved.attemptId}/submit`, {
-          method: "POST", headers: { "content-type": "application/json", "x-resume-token": saved.resumeToken }, body: JSON.stringify({ answers: state.answers }),
-        }).then((response) => {
-          if (response.ok || response.status === 409) { setPending(false); }
-        }).catch(() => undefined).finally(() => { submitting.current = false; });
+    if (!finalized) return;
+    const state = finalized;
+    const controller = new AbortController();
+    let timer: number | undefined;
+    let retries = 0;
+    let sending = false;
+    let terminal = false;
+
+    async function send() {
+      if (sending || terminal || controller.signal.aborted) return;
+      window.clearTimeout(timer);
+      if (!navigator.onLine) { setSubmissionStatus("waiting"); return; }
+      sending = true;
+      setSubmissionStatus("sending");
+      try {
+        const response = await fetch(`/api/public/attempts/${state.attemptId}/submit`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-resume-token": state.resumeToken },
+          body: JSON.stringify({ answers: state.answers }),
+          signal: controller.signal,
+        });
+        const duplicate = response.status === 409 && (await response.json().catch(() => null))?.error === "already_submitted";
+        if (controller.signal.aborted) return;
+        if (response.ok || duplicate) {
+          terminal = true;
+          setSubmissionStatus("sent");
+          return;
+        }
+        if (response.status < 500) {
+          terminal = true;
+          setSubmissionStatus("failed");
+          return;
+        }
+      } catch {
+        if (controller.signal.aborted) return;
+      } finally {
+        sending = false;
       }
+
+      if (!navigator.onLine) { setSubmissionStatus("waiting"); return; }
+      const delay = retryDelays[retries++];
+      if (delay === undefined) { setSubmissionStatus("retry"); return; }
+      setSubmissionStatus("waiting");
+      timer = window.setTimeout(() => void send(), delay);
+    }
+
+    const retry = () => {
+      if (sending || terminal) return;
+      retries = 0;
+      void send();
     };
-    retry();
+    retrySubmissionRef.current = retry;
     window.addEventListener("online", retry);
-    return () => window.removeEventListener("online", retry);
-  }, [pending, saved, storageKey]);
+    void send();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+      window.removeEventListener("online", retry);
+      retrySubmissionRef.current = () => {};
+    };
+  }, [finalized]);
 
   const [unlisted, setUnlisted] = useState(false);
   const [requestStatus, setRequestStatus] = useState("");
@@ -184,9 +228,9 @@ export function useAttempt() {
   const requestedNameKey = receiptKey + ":name";
 
   useEffect(() => {
-    const receipt = localStorage.getItem(receiptKey);
+    const receipt = readStorage(receiptKey);
     if (!receipt) return;
-    setName(localStorage.getItem(requestedNameKey) ?? "");
+    setName(readStorage(requestedNameKey) ?? "");
     fetch(`/api/public/quizzes/${token}/access-request`, { headers: { "x-request-receipt": receipt }, cache: "no-store" })
       .then(async (response) => { if (!response.ok) throw new Error(); setRequestStatus((await response.json()).status); })
       .catch(() => showError(t("Không tải được trạng thái yêu cầu.")));
@@ -233,7 +277,7 @@ export function useAttempt() {
       if (!response.ok) throw new Error(t("Không thể bắt đầu bài kiểm tra. Hãy kiểm tra link và kết nối mạng."));
       const payload = await response.json();
       const state: SavedState = { attemptId: payload.attempt.id, resumeToken: payload.resumeToken, answers: {}, studentName: name, studentClass: quiz?.assignedClass ?? className };
-      localStorage.setItem(storageKey, JSON.stringify(state));
+      setPersisted(saveAttempt(storageKey, state));
       setSaved(state);
       setAttempt({ ...payload.attempt, submitted: false });
       setQuiz({ title: payload.quiz.title, description: "", promptDocument: payload.quiz.prompt ?? { type: "doc", content: [] } });
@@ -250,5 +294,5 @@ export function useAttempt() {
     setAnswers(latestAnswers.current);
   }
 
-  return { quiz, questions, attempt, name, setName, className, setClassName, answers, loading, busy, done, pending, unlisted, setUnlisted, requestStatus, requestAccess, start, setAnswer, submitLatest };
+  return { quiz, questions, attempt, name, setName, className, setClassName, answers, loading, busy, done, submissionStatus: finalized ? submissionStatus : "sent", persisted, retrySubmission: () => retrySubmissionRef.current(), unlisted, setUnlisted, requestStatus, requestAccess, start, setAnswer, submitLatest };
 }

@@ -36,6 +36,8 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   const router = useRouter();
   const params = useParams<{ id?: string }>();
   const [listLoading, setListLoading] = useState(true);
+  const [listState, setListState] = useState<"loading" | "ready" | "error">("loading");
+  const listRequest = useRef<AbortController | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(true);
   const [quizzes, setQuizzes] = useState<QuizRow[]>([]);
   const [questions, setQuestions] = useState<QuestionDraft[]>([emptyQuestion()]);
@@ -44,6 +46,9 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   const [description, setDescription] = useState("");
   const [promptDocument, setPromptDocument] = useState<PromptDocument>(emptyPrompt);
   const [promptOpen, setPromptOpen] = useState(false);
+  const [promptMounted, setPromptMounted] = useState(false);
+  const [promptVersion, setPromptVersion] = useState(0);
+  useEffect(() => { if (promptOpen) setPromptMounted(true); }, [promptOpen]);
   const [uploading, setUploading] = useState(false);
   const [duration, setDuration] = useState(30);
   const [expiresAt, setExpiresAt] = useState("");
@@ -82,6 +87,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   });
   function restoreDraft() {
     if (!draftCandidate) return;
+    setPromptOpen(Boolean(draftCandidate.promptDocument.content?.length));
     setTitle(draftCandidate.title); setDescription(draftCandidate.description); setPromptDocument(draftCandidate.promptDocument); setDuration(draftCandidate.duration); setExpiresAt(draftCandidate.expiresAt); setSubject(draftCandidate.subject); setGradeLevel(draftCandidate.gradeLevel); setQuestions(draftCandidate.questions);
     setDraftCandidate(null); setDraftStatus("Đã khôi phục bản nháp");
   }
@@ -89,22 +95,33 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   const showError = useErrorToast();
   useEffect(() => { void apiFetch("/api/teacher/catalogs", { cache: "no-store" }).then(async (response) => { const data = await response.json(); setSubjects(data.subjects); setGradeLevels(data.gradeLevels); }).catch((error) => reportApiError(error, "Không tải được danh mục.", t, showError)).finally(() => setCatalogLoading(false)); }, [showError, t]);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async () => {
+    listRequest.current?.abort();
+    const controller = new AbortController();
+    listRequest.current = controller;
+    const { signal } = controller;
+    setListState("loading");
     try {
       const query = new URLSearchParams();
       if (search) query.set("search", search);
       if (status) query.set("status", status);
       const response = await apiFetch(`/api/teacher/quizzes?view=list&${query}`, { cache: "no-store", signal });
 
-      setQuizzes((await response.json()).quizzes);
-    } catch (error) { reportApiError(error, "Không tải được danh sách bài kiểm tra.", t, showError); }
-  }, [search, status, showError, t]);
+      const data = await response.json();
+      if (signal.aborted) return;
+      setQuizzes(data.quizzes);
+      setListState("ready");
+    } catch {
+      if (!signal.aborted) setListState("error");
+    } finally {
+      if (!signal.aborted) setListLoading(false);
+    }
+  }, [search, status]);
 
   useEffect(() => {
     if (mode !== "list") return;
-    const controller = new AbortController();
-    void load(controller.signal).finally(() => { if (!controller.signal.aborted) setListLoading(false); });
-    return () => controller.abort();
+    void load();
+    return () => listRequest.current?.abort();
   }, [load, mode]);
   useEffect(() => {
     if (mode === "create") {
@@ -214,13 +231,14 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     await load();
   }
 
-  function clearForm() { setEditing(null); setTitle(""); setDescription(""); setPromptDocument(emptyPrompt); setPromptOpen(false); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setAssignedClass(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
+  function clearForm() { setPromptMounted(false); setPromptVersion((version) => version + 1); setEditing(null); setTitle(""); setDescription(""); setPromptDocument(emptyPrompt); setPromptOpen(false); setDuration(30); setExpiresAt(""); setSubject(""); setGradeLevel(""); setAssignedClass(""); setQuestions([emptyQuestion()]); setCollapsedQuestionIds(new Set()); setQuestionError(null); }
   function closeForm() { if (busy || importBusy) return; if (draftKey && draftReady && !draftCandidate) { try { localStorage.setItem(draftKey, JSON.stringify({ savedAt: Date.now(), title, description, promptDocument, duration, expiresAt, subject, gradeLevel, questions } satisfies SavedDraft)); } catch { setDraftStatus("Không lưu được bản nháp trên trình duyệt."); } } if (mode !== "list") { router.push(editing ? `${quizPath}/${editing}` : quizPath); return; } setFormOpen(false); setFormError(""); setImportErrors([]); clearForm(); }
   function newQuiz() { router.push(quizPath + "/new"); }
 
   async function edit(quiz: QuizRow, result?: QuizDetail) {
     if (mode === "list" || mode === "view") { router.push(`${quizPath}/${quiz.id}/edit`); return; }
     if (!result) { setDetailError(true); showError(t("Không tải được bài kiểm tra để sửa.")); return; }
+    setPromptMounted(false); setPromptVersion((version) => version + 1);
     setEditing(quiz.id); setTitle(result.quiz.title); setDescription(result.quiz.description); setPromptDocument(result.quiz.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(result.quiz.promptDocument?.content?.length)); setDuration(result.quiz.durationMinutes); setSubject(result.quiz.subject ?? ""); setGradeLevel(result.quiz.gradeLevel ?? ""); setAssignedClass(result.quiz.assignedClass ?? "");
     setExpiresAt(result.quiz.linkExpiresAt ? localDateTime(new Date(result.quiz.linkExpiresAt)) : "");
     setQuestions(result.questions.map((question: { type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number }) => ({ id: crypto.randomUUID(), type: question.type, prompt: question.prompt, options: question.options.length ? question.options : ["", ""], correctOption: question.correctOption ?? -1, points: question.points })));
@@ -369,10 +387,10 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
       <div id="quiz-questions" className="scroll-mt-6 border-t border-line pt-6"><h3 className="flex items-center gap-3 text-lg font-bold">{t("Câu hỏi")}</h3><p className="mt-1 text-sm text-content-muted">{t("Chọn loại câu hỏi, nhập nội dung và đáp án bên dưới.")}</p></div>
       <DragDropProvider onDragEnd={(event) => { if (event.canceled || !isSortable(event.operation.source)) return; const { initialIndex, index } = event.operation.source; if (initialIndex === index) return; setQuestions((current) => { const next = [...current]; const [moved] = next.splice(initialIndex, 1); next.splice(index, 0, moved); return next; }); setQuestionError(null); setFormError(""); setFormErrorTarget(""); }}><div className="space-y-4">{questions.map((question, index) => <QuestionEditor key={question.id} question={question} index={index} count={questions.length} collapsed={collapsedQuestionIds.has(question.id)} toggle={() => toggleQuestion(question.id)} duplicate={() => duplicateQuestion(index)} error={questionError === index ? questionErrorMessage : undefined} t={t} update={(changes) => updateQuestion(index, changes)} remove={() => { setQuestions((items) => items.filter((_, i) => i !== index)); setQuestionError(null); }} />)}</div></DragDropProvider>
       <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("choice")}>{t("+ Câu trắc nghiệm")}</Button><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("essay")}>{t("+ Câu tự luận")}</Button></div>
-      <details id="quiz-prompt" className="scroll-mt-6 border-t border-line pt-4" open={promptOpen} onToggle={(event) => setPromptOpen(event.currentTarget.open)}><summary className="min-h-11 cursor-pointer content-center rounded-xl font-semibold hover:text-brand">{t("Đề bài (tùy chọn)")}</summary><div className="mt-4">{promptOpen && <PromptEditor value={promptDocument} onChange={setPromptDocument} />}</div></details>
+      <details id="quiz-prompt" className="scroll-mt-6 border-t border-line pt-4" open={promptOpen} onToggle={(event) => setPromptOpen(event.currentTarget.open)}><summary className="min-h-11 cursor-pointer content-center rounded-xl font-semibold hover:text-brand">{t("Đề bài (tùy chọn)")}</summary><div className="mt-4">{(promptOpen || promptMounted) && <PromptEditor key={promptVersion} value={promptDocument} onChange={setPromptDocument} />}</div></details>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4"><p className="text-sm text-content-muted">{questions.length} {t("câu hỏi")}</p><div className="ml-auto flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" onClick={closeForm} disabled={busy || importBusy}>{t("Hủy")}</Button><Button type="submit" disabled={busy || uploading || importBusy}>{busy ? t("Đang lưu…") : editing ? t("Lưu thay đổi") : t("Tạo bài kiểm tra")}</Button></div></div>
     </QuizEditorForm></QuizSurface>}
-    {mode === "list" && <QuizList quizzes={quizzes} search={search} setSearch={setSearch} status={status} setStatus={setStatus}
+    {mode === "list" && <QuizList loadState={listState} retry={() => void load()} quizzes={quizzes} search={search} setSearch={setSearch} status={status} setStatus={setStatus}
       openDetail={openDetail} copyLink={copyLink} edit={edit} openLinkExpiry={openLinkExpiry} extendAttempts={extendAttempts}
       stop={stop} deleteQuiz={deleteQuiz} cloneQuiz={(quiz) => { setCloneSource(quiz); setCloneClass(""); }} />}
   </DashboardContent>;

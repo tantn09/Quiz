@@ -16,17 +16,35 @@ import { Download, Ellipsis, Trash2 } from "lucide-react";
 type ResultGroup = { quizId: string; quizTitle: string; className: string; inProgress: number; submitted: number; needsReview: number; graded: number };
 
 function ResultActions({ group, download, remove }: { group: ResultGroup; download: () => void; remove: () => void }) {
+  const t = useTranslation();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const focusTrigger = () => triggerRef.current?.focus();
+  function choose(action: () => void) {
+    setOpen(false);
+    focusTrigger();
+    action();
+  }
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
+    menuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus();
     const closeOutside = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setOpen(false); };
-    const closeEscape = (event: KeyboardEvent) => { if (event.key === "Escape") { setOpen(false); menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); } };
+    const closeEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && menuRef.current?.contains(document.activeElement)) { event.preventDefault(); setOpen(false); focusTrigger(); } };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeEscape);
     return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeEscape); };
   }, [open]);
-  return <div ref={menuRef} className="relative shrink-0"><button type="button" aria-label={`Tùy chọn kết quả: ${group.quizTitle}, lớp ${group.className}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-line hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus"><Ellipsis size={20} aria-hidden="true" /></button>{open && <div role="menu" aria-label={`Tùy chọn kết quả ${group.quizTitle}`} className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-xl"><button type="button" role="menuitem" onClick={() => { setOpen(false); download(); }} className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus"><Download size={17} aria-hidden="true" />Xuất Excel</button><button type="button" role="menuitem" disabled={!group.submitted} onClick={() => { setOpen(false); remove(); }} className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-red-700 hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50"><Trash2 size={17} aria-hidden="true" />Xóa các bài đã nộp</button></div>}</div>;
+  return <div ref={menuRef} className="relative shrink-0" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}><button ref={triggerRef} type="button" aria-label={`${t("Tùy chọn kết quả")}: ${group.quizTitle}, ${t("Lớp")} ${group.className}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-line hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus"><Ellipsis size={20} aria-hidden="true" /></button>{open && <div role="menu" aria-label={`${t("Tùy chọn kết quả")} ${group.quizTitle}`} onKeyDown={(event) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)'));
+    if (!items.length) return;
+    event.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 :
+      (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  }} className="absolute right-0 top-full z-20 mt-2 w-56 rounded-xl border border-line bg-surface p-1.5 shadow-xl"><button type="button" role="menuitem" tabIndex={-1} onClick={() => choose(download)} className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus"><Download size={17} aria-hidden="true" />{t("Xuất Excel")}</button><button type="button" role="menuitem" tabIndex={-1} disabled={!group.submitted} onClick={() => choose(remove)} className="flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm text-red-700 hover:bg-surface-subtle focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50"><Trash2 size={17} aria-hidden="true" />{t("Xóa các bài đã nộp")}</button></div>}</div>;
 }
 
 type Roster = { count: number; assignedClass: string | null; notStarted: { id: string; name: string }[]; requests: { id: string; name: string; status: string }[] };
@@ -49,11 +67,25 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
 
   const [groupRevision, setGroupRevision] = useState(0);
   const [loadedGroup, setLoadedGroup] = useState<string | null>(null);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [summaryState, setSummaryState] = useState<"loading" | "ready" | "error">("loading");
+  const summaryRequest = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
-    const summaryResponse = await fetch("/api/teacher/results/summary", { cache: "no-store" });
-    if (!summaryResponse.ok) throw new Error();
-    const summary = await summaryResponse.json();
+    summaryRequest.current?.abort();
+    const controller = new AbortController();
+    summaryRequest.current = controller;
+    setSummaryState((state) => state === "ready" ? state : "loading");
+    let summary: { groups: ResultGroup[] };
+    try {
+      const response = await fetch("/api/teacher/results/summary", { cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error();
+      summary = await response.json();
+    } catch {
+      if (!controller.signal.aborted) setSummaryState("error");
+      return;
+    }
+    if (controller.signal.aborted) return;
+    setSummaryState("ready");
     setGroups(summary.groups);
     if (!initialGroupLoaded.current) {
       initialGroupLoaded.current = true;
@@ -64,16 +96,20 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
       if (target) setSelected({ quizId: target.quizId, className: target.className });
     }
     setGroupRevision((revision) => revision + 1);
-  }, [showError, t]);
+  }, []);
 
-  useEffect(() => { void load().catch(() => showError(t("Không tải được kết quả."))).finally(() => setInitialLoading(false)); }, [load, showError, t]);
+  useEffect(() => {
+    void load();
+    return () => summaryRequest.current?.abort();
+  }, [load]);
 
-  const { openResult, closeResult, gradingDialog } = useGradingDialog(load, setNotice);
+  const { openingId, openResult, closeResult, gradingDialog } = useGradingDialog(load, setNotice);
   const quizId = selected?.quizId;
   const selectedClass = selected?.className;
   const selectedKey = selected ? JSON.stringify([quizId, selectedClass]) : null;
   useEffect(() => {
     setLoadedGroup(null);
+    setGroupError(null);
     if (!quizId || selectedClass === undefined) return;
     const controller = new AbortController();
     const query = new URLSearchParams({ scope: "group", quizId, className: selectedClass });
@@ -87,13 +123,11 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
         }
       }).catch(() => {
         if (!controller.signal.aborted) {
-          setRows([]);
-          setLoadedGroup(JSON.stringify([quizId, selectedClass]));
-          showError(t("Không tải được kết quả."));
+          setGroupError(JSON.stringify([quizId, selectedClass]));
         }
       });
     return () => controller.abort();
-  }, [quizId, selectedClass, groupRevision, showError, t]);
+  }, [quizId, selectedClass, groupRevision]);
 
   const loadRoster = useCallback(async (id: string, signal?: AbortSignal) => {
     const response = await fetch(`/api/teacher/quizzes/${id}/roster`, { cache: "no-store", signal });
@@ -136,22 +170,23 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
     try {
       const response = await fetch(url, { method: "DELETE" });
       if (!response.ok) throw new Error();
-      setDeleteTarget(null); closeResult(); setNotice("Đã xóa bài đã nộp."); await load();
+      setDeleteTarget(null); closeResult(); setNotice(t("Đã xóa bài đã nộp.")); await load();
     } catch { showError(t("Không thể xóa bài.")); } finally { setDeleting(false); }
   }
 
   const classes = [...new Set(groups.map((group) => group.className))];
-  if (initialLoading) return <DashboardLoading />;
+  if (summaryState === "loading") return <DashboardLoading />;
 
   return <DashboardContent>
     <PageHeader title={t("Kết quả bài làm")} description={t("Xem câu trả lời, chấm tự luận và xuất bảng điểm.")} />
     {notice && <Alert className="mt-4">{notice}</Alert>}
-    <div className="mt-6 space-y-5">{classes.map((classItem) => <section key={classItem} className="rounded-2xl border border-line bg-surface p-5"><h2 className="text-xl font-bold">Lớp {classItem}</h2><div className="mt-4 space-y-3">{groups.filter((group) => group.className === classItem).map((group) => { const open = selected?.quizId === group.quizId && selected.className === group.className; const attempts = open && loadedGroup === selectedKey ? rows.filter((row) => row.quizId === group.quizId && row.studentClass === group.className && (filter === "submitted" ? Boolean(row.submittedAt) : !row.submittedAt)) : []; return <article key={group.quizId} className="rounded-xl border border-line p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{group.quizTitle}</h3><p className="mt-1 text-sm text-content-muted">Đang làm: {group.inProgress} · Đã nộp: {group.submitted} · Cần chấm: {group.needsReview} · Đã chấm: {group.graded}</p></div><div className="flex flex-wrap gap-2"><Button type="button" disabled={reviewing} onClick={() => setSelected(open ? null : { quizId: group.quizId, className: group.className })}>{open ? "Thu gọn" : "Xem bài làm"}</Button><ResultActions group={group} download={() => void download(group.quizId, group.quizTitle, group.className)} remove={() => setDeleteTarget({ quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: group.submitted })} /></div></div>{open && <div className="mt-4 space-y-4">
+    {summaryState === "error" && <Alert role="alert" className="mt-4">{t("Không tải được kết quả.")} <Button type="button" variant="outline" onClick={() => void load()}>{t("Thử lại")}</Button></Alert>}
+    {summaryState === "ready" && <div className="mt-6 space-y-5">{classes.map((classItem) => <section key={classItem} className="rounded-2xl border border-line bg-surface p-5"><h2 className="text-xl font-bold">{t("Lớp")} {classItem}</h2><div className="mt-4 space-y-3">{groups.filter((group) => group.className === classItem).map((group) => { const open = selected?.quizId === group.quizId && selected.className === group.className; const attempts = open && loadedGroup === selectedKey ? rows.filter((row) => row.quizId === group.quizId && row.studentClass === group.className && (filter === "submitted" ? Boolean(row.submittedAt) : !row.submittedAt)) : []; return <article key={group.quizId} className="rounded-xl border border-line p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{group.quizTitle}</h3><p className="mt-1 text-sm text-content-muted">{t("Đang làm")}: {group.inProgress} · {t("Đã nộp")}: {group.submitted} · {t("Cần chấm")}: {group.needsReview} · {t("Đã chấm")}: {group.graded}</p></div><div className="flex flex-wrap gap-2"><Button type="button" disabled={reviewing} onClick={() => { closeResult(); setSelected(open ? null : { quizId: group.quizId, className: group.className }); }}>{t(open ? "Thu gọn" : "Xem bài làm")}</Button><ResultActions group={group} download={() => void download(group.quizId, group.quizTitle, group.className)} remove={() => setDeleteTarget({ quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: group.submitted })} /></div></div>{open && <div className="mt-4 space-y-4">
       <div className="flex flex-wrap gap-2">{[["submitted", t("Đã nộp"), group.submitted], ["started", t("Đã bắt đầu, chưa nộp"), group.inProgress], ...(roster?.assignedClass === group.className ? [["missing", t("Chưa làm"), roster.count ? roster.notStarted.length : "—"], ["requests", t("Yêu cầu làm bài"), roster.requests.filter((item) => item.status === "pending").length]] : [])].map(([key, label, count]) => <Button key={key} variant={filter === key ? "default" : "outline"} aria-pressed={filter === key} disabled={reviewing} onClick={() => setFilter(String(key))}>{label} · {count}</Button>)}</div>
       {filter === "missing" && (!roster?.count ? <p>{t("Thêm học sinh vào lớp để theo dõi ai chưa làm.")} <a className="underline" href={admin ? "/admin/students" : "/teacher/students"}>{t("Học sinh")}</a></p> : <ul className="space-y-2">{roster.notStarted.map((item) => <li key={item.id}>{item.name}</li>)}{!roster.notStarted.length && <li>{t("Tất cả học sinh đã bắt đầu.")}</li>}</ul>)}
       {filter === "requests" && <AccessRequests requests={roster?.requests ?? []} reviewing={reviewing} decide={decide} />}
-      {(filter === "submitted" || filter === "started") && (loadedGroup !== selectedKey ? <p role="status">{t("Đang tải chi tiết…")}</p> : <div><Table className="w-full min-w-[600px] text-left text-sm"><thead><tr><th scope="col">Học sinh</th><th scope="col">Nộp lúc</th><th scope="col">Điểm</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{attempts.map((row) => <tr key={row.id} className="border-t border-line"><td className="py-3">{row.studentName}<span className="block text-xs">Mã đề {row.variantCode}</span></td><td>{row.submittedAt ? new Date(row.submittedAt).toLocaleString(language === "en" ? "en-US" : "vi-VN") : ""}</td><td>{row.score ?? "—"}/{row.maxScore}</td><td>{!row.submittedAt ? t("Chưa nộp") : row.gradingStatus === "graded" ? t("Đã chấm") : t("Cần chấm")}</td><td className="py-2">{row.submittedAt && <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => void openResult(row.id)}>Mở bài</Button><Button type="button" variant="outline" onClick={() => setDeleteTarget({ id: row.id, quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: 1 })}>Xóa bài</Button></div>}</td></tr>)}{!attempts.length && <tr><td colSpan={5} className="py-5 text-content-muted">{t(filter === "submitted" ? "Chưa có bài đã nộp." : "Chưa có bài đang chờ nộp.")}</td></tr>}</tbody></Table></div>)}</div>}</article>; })}</div></section>)}{!classes.length && <p className="rounded-2xl border border-line bg-surface p-8 text-content-muted">Chưa có lớp hoặc bài làm.</p>}</div>
-    {deleteTarget && <Modal title={deleteTarget.id ? "Xóa bài đã nộp" : "Xóa các bài đã nộp"} onClose={() => !deleting && setDeleteTarget(null)}><p>{deleteTarget.id ? `Xóa bài đã nộp của lớp ${deleteTarget.className} trong bài kiểm tra “${deleteTarget.quizTitle}”?` : `Xóa ${deleteTarget.count} bài đã nộp của lớp ${deleteTarget.className} trong bài kiểm tra “${deleteTarget.quizTitle}”?`}</p><p className="mt-2 text-sm text-content-muted">Các bài đang làm dở được giữ nguyên. Không thể khôi phục bài đã xóa.</p><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Hủy</Button><Button type="button" onClick={() => void confirmDelete()} disabled={deleting}>Xác nhận xóa</Button></div></Modal>}
+      {(filter === "submitted" || filter === "started") && (groupError === selectedKey ? <Alert role="alert">{t("Không tải được kết quả.")} <Button type="button" variant="outline" onClick={() => setGroupRevision((revision) => revision + 1)}>{t("Thử lại")}</Button></Alert> : loadedGroup !== selectedKey ? <p role="status">{t("Đang tải chi tiết…")}</p> : <div><Table className="w-full min-w-[600px] text-left text-sm"><thead><tr><th scope="col">{t("Học sinh")}</th><th scope="col">{t("Nộp lúc")}</th><th scope="col">{t("Điểm")}</th><th scope="col">{t("Trạng thái")}</th><th scope="col">{t("Thao tác")}</th></tr></thead><tbody>{attempts.map((row) => <tr key={row.id} className="border-t border-line"><td className="py-3">{row.studentName}<span className="block text-xs">{t("Mã đề")} {row.variantCode}</span></td><td>{row.submittedAt ? new Date(row.submittedAt).toLocaleString(language === "en" ? "en-US" : "vi-VN") : ""}</td><td>{row.score ?? "—"}/{row.maxScore}</td><td>{!row.submittedAt ? t("Chưa nộp") : row.gradingStatus === "graded" ? t("Đã chấm") : t("Cần chấm")}</td><td className="py-2">{row.submittedAt && <div className="flex gap-2"><Button type="button" variant="outline" aria-disabled={openingId === row.id} onClick={() => { if (openingId !== row.id) void openResult(row.id); }}>{t(openingId === row.id ? "Đang mở…" : "Mở bài")}</Button><Button type="button" variant="outline" onClick={() => setDeleteTarget({ id: row.id, quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: 1 })}>{t("Xóa bài")}</Button></div>}</td></tr>)}{!attempts.length && <tr><td colSpan={5} className="py-5 text-content-muted">{t(filter === "submitted" ? "Chưa có bài đã nộp." : "Chưa có bài đang chờ nộp.")}</td></tr>}</tbody></Table></div>)}</div>}</article>; })}</div></section>)}{!classes.length && <p className="rounded-2xl border border-line bg-surface p-8 text-content-muted">{t("Chưa có lớp hoặc bài làm.")}</p>}</div>}
+    {deleteTarget && <Modal title={t(deleteTarget.id ? "Xóa bài đã nộp" : "Xóa các bài đã nộp")} closeLabel={t("Đóng")} onClose={() => !deleting && setDeleteTarget(null)}><p>{t(deleteTarget.id ? "Xóa bài đã nộp của lớp {class} trong bài kiểm tra “{quiz}”?" : "Xóa {count} bài đã nộp của lớp {class} trong bài kiểm tra “{quiz}”?").replace(/\{(count|class|quiz)\}/g, (_, key: "count" | "class" | "quiz") => ({ count: String(deleteTarget.count), class: deleteTarget.className, quiz: deleteTarget.quizTitle })[key])}</p><p className="mt-2 text-sm text-content-muted">{t("Các bài đang làm dở được giữ nguyên. Không thể khôi phục bài đã xóa.")}</p><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>{t("Hủy")}</Button><Button type="button" onClick={() => void confirmDelete()} disabled={deleting}>{t("Xác nhận xóa")}</Button></div></Modal>}
     {gradingDialog}
   </DashboardContent>;
 }
