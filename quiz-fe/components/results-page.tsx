@@ -47,13 +47,12 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
   const showError = useErrorToast();
   const language = useLocale();
 
+  const [groupRevision, setGroupRevision] = useState(0);
+  const [loadedGroup, setLoadedGroup] = useState<string | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const load = useCallback(async () => {
-    const [summaryResponse, resultsResponse] = await Promise.all([
-      fetch("/api/teacher/results/summary", { cache: "no-store" }),
-      fetch("/api/teacher/results", { cache: "no-store" }),
-    ]);
-    if (!summaryResponse.ok || !resultsResponse.ok) { showError(t("Không tải được kết quả.")); return; }
+    const summaryResponse = await fetch("/api/teacher/results/summary", { cache: "no-store" });
+    if (!summaryResponse.ok) throw new Error();
     const summary = await summaryResponse.json();
     setGroups(summary.groups);
     if (!initialGroupLoaded.current) {
@@ -64,7 +63,7 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
       const target = summary.groups.find((group: { quizId: string; className: string }) => group.quizId === quizId && (!className || group.className === className));
       if (target) setSelected({ quizId: target.quizId, className: target.className });
     }
-    setRows((await resultsResponse.json()).results);
+    setGroupRevision((revision) => revision + 1);
   }, [showError, t]);
 
   useEffect(() => { void load().catch(() => showError(t("Không tải được kết quả."))).finally(() => setInitialLoading(false)); }, [load, showError, t]);
@@ -72,6 +71,30 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
   const { openResult, closeResult, gradingDialog } = useGradingDialog(load, setNotice);
   const quizId = selected?.quizId;
   const selectedClass = selected?.className;
+  const selectedKey = selected ? JSON.stringify([quizId, selectedClass]) : null;
+  useEffect(() => {
+    setLoadedGroup(null);
+    if (!quizId || selectedClass === undefined) return;
+    const controller = new AbortController();
+    const query = new URLSearchParams({ scope: "group", quizId, className: selectedClass });
+    void fetch(`/api/teacher/results?${query}`, { cache: "no-store", signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        const data = await response.json();
+        if (!controller.signal.aborted) {
+          setRows(data.results);
+          setLoadedGroup(JSON.stringify([quizId, selectedClass]));
+        }
+      }).catch(() => {
+        if (!controller.signal.aborted) {
+          setRows([]);
+          setLoadedGroup(JSON.stringify([quizId, selectedClass]));
+          showError(t("Không tải được kết quả."));
+        }
+      });
+    return () => controller.abort();
+  }, [quizId, selectedClass, groupRevision, showError, t]);
+
   const loadRoster = useCallback(async (id: string, signal?: AbortSignal) => {
     const response = await fetch(`/api/teacher/quizzes/${id}/roster`, { cache: "no-store", signal });
     if (!response.ok) throw new Error();
@@ -123,11 +146,11 @@ export default function ResultsPage({ admin }: { admin: boolean }) {
   return <DashboardContent>
     <PageHeader title={t("Kết quả bài làm")} description={t("Xem câu trả lời, chấm tự luận và xuất bảng điểm.")} />
     {notice && <Alert className="mt-4">{notice}</Alert>}
-    <div className="mt-6 space-y-5">{classes.map((classItem) => <section key={classItem} className="rounded-2xl border border-line bg-surface p-5"><h2 className="text-xl font-bold">Lớp {classItem}</h2><div className="mt-4 space-y-3">{groups.filter((group) => group.className === classItem).map((group) => { const open = selected?.quizId === group.quizId && selected.className === group.className; const attempts = rows.filter((row) => row.quizId === group.quizId && row.studentClass === group.className && (filter === "submitted" ? Boolean(row.submittedAt) : !row.submittedAt)); return <article key={group.quizId} className="rounded-xl border border-line p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{group.quizTitle}</h3><p className="mt-1 text-sm text-content-muted">Đang làm: {group.inProgress} · Đã nộp: {group.submitted} · Cần chấm: {group.needsReview} · Đã chấm: {group.graded}</p></div><div className="flex flex-wrap gap-2"><Button type="button" disabled={reviewing} onClick={() => setSelected(open ? null : { quizId: group.quizId, className: group.className })}>{open ? "Thu gọn" : "Xem bài làm"}</Button><ResultActions group={group} download={() => void download(group.quizId, group.quizTitle, group.className)} remove={() => setDeleteTarget({ quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: group.submitted })} /></div></div>{open && <div className="mt-4 space-y-4">
+    <div className="mt-6 space-y-5">{classes.map((classItem) => <section key={classItem} className="rounded-2xl border border-line bg-surface p-5"><h2 className="text-xl font-bold">Lớp {classItem}</h2><div className="mt-4 space-y-3">{groups.filter((group) => group.className === classItem).map((group) => { const open = selected?.quizId === group.quizId && selected.className === group.className; const attempts = open && loadedGroup === selectedKey ? rows.filter((row) => row.quizId === group.quizId && row.studentClass === group.className && (filter === "submitted" ? Boolean(row.submittedAt) : !row.submittedAt)) : []; return <article key={group.quizId} className="rounded-xl border border-line p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div><h3 className="font-semibold">{group.quizTitle}</h3><p className="mt-1 text-sm text-content-muted">Đang làm: {group.inProgress} · Đã nộp: {group.submitted} · Cần chấm: {group.needsReview} · Đã chấm: {group.graded}</p></div><div className="flex flex-wrap gap-2"><Button type="button" disabled={reviewing} onClick={() => setSelected(open ? null : { quizId: group.quizId, className: group.className })}>{open ? "Thu gọn" : "Xem bài làm"}</Button><ResultActions group={group} download={() => void download(group.quizId, group.quizTitle, group.className)} remove={() => setDeleteTarget({ quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: group.submitted })} /></div></div>{open && <div className="mt-4 space-y-4">
       <div className="flex flex-wrap gap-2">{[["submitted", t("Đã nộp"), group.submitted], ["started", t("Đã bắt đầu, chưa nộp"), group.inProgress], ...(roster?.assignedClass === group.className ? [["missing", t("Chưa làm"), roster.count ? roster.notStarted.length : "—"], ["requests", t("Yêu cầu làm bài"), roster.requests.filter((item) => item.status === "pending").length]] : [])].map(([key, label, count]) => <Button key={key} variant={filter === key ? "default" : "outline"} aria-pressed={filter === key} disabled={reviewing} onClick={() => setFilter(String(key))}>{label} · {count}</Button>)}</div>
       {filter === "missing" && (!roster?.count ? <p>{t("Thêm học sinh vào lớp để theo dõi ai chưa làm.")} <a className="underline" href={admin ? "/admin/students" : "/teacher/students"}>{t("Học sinh")}</a></p> : <ul className="space-y-2">{roster.notStarted.map((item) => <li key={item.id}>{item.name}</li>)}{!roster.notStarted.length && <li>{t("Tất cả học sinh đã bắt đầu.")}</li>}</ul>)}
       {filter === "requests" && <AccessRequests requests={roster?.requests ?? []} reviewing={reviewing} decide={decide} />}
-      {(filter === "submitted" || filter === "started") && <div><Table className="w-full min-w-[600px] text-left text-sm"><thead><tr><th scope="col">Học sinh</th><th scope="col">Nộp lúc</th><th scope="col">Điểm</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{attempts.map((row) => <tr key={row.id} className="border-t border-line"><td className="py-3">{row.studentName}<span className="block text-xs">Mã đề {row.variantCode}</span></td><td>{row.submittedAt ? new Date(row.submittedAt).toLocaleString(language === "en" ? "en-US" : "vi-VN") : ""}</td><td>{row.score ?? "—"}/{row.maxScore}</td><td>{!row.submittedAt ? t("Chưa nộp") : row.gradingStatus === "graded" ? t("Đã chấm") : t("Cần chấm")}</td><td className="py-2">{row.submittedAt && <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => void openResult(row.id)}>Mở bài</Button><Button type="button" variant="outline" onClick={() => setDeleteTarget({ id: row.id, quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: 1 })}>Xóa bài</Button></div>}</td></tr>)}{!attempts.length && <tr><td colSpan={5} className="py-5 text-content-muted">{t(filter === "submitted" ? "Chưa có bài đã nộp." : "Chưa có bài đang chờ nộp.")}</td></tr>}</tbody></Table></div>}</div>}</article>; })}</div></section>)}{!classes.length && <p className="rounded-2xl border border-line bg-surface p-8 text-content-muted">Chưa có lớp hoặc bài làm.</p>}</div>
+      {(filter === "submitted" || filter === "started") && (loadedGroup !== selectedKey ? <p role="status">{t("Đang tải chi tiết…")}</p> : <div><Table className="w-full min-w-[600px] text-left text-sm"><thead><tr><th scope="col">Học sinh</th><th scope="col">Nộp lúc</th><th scope="col">Điểm</th><th scope="col">Trạng thái</th><th scope="col">Thao tác</th></tr></thead><tbody>{attempts.map((row) => <tr key={row.id} className="border-t border-line"><td className="py-3">{row.studentName}<span className="block text-xs">Mã đề {row.variantCode}</span></td><td>{row.submittedAt ? new Date(row.submittedAt).toLocaleString(language === "en" ? "en-US" : "vi-VN") : ""}</td><td>{row.score ?? "—"}/{row.maxScore}</td><td>{!row.submittedAt ? t("Chưa nộp") : row.gradingStatus === "graded" ? t("Đã chấm") : t("Cần chấm")}</td><td className="py-2">{row.submittedAt && <div className="flex gap-2"><Button type="button" variant="outline" onClick={() => void openResult(row.id)}>Mở bài</Button><Button type="button" variant="outline" onClick={() => setDeleteTarget({ id: row.id, quizId: group.quizId, quizTitle: group.quizTitle, className: group.className, count: 1 })}>Xóa bài</Button></div>}</td></tr>)}{!attempts.length && <tr><td colSpan={5} className="py-5 text-content-muted">{t(filter === "submitted" ? "Chưa có bài đã nộp." : "Chưa có bài đang chờ nộp.")}</td></tr>}</tbody></Table></div>)}</div>}</article>; })}</div></section>)}{!classes.length && <p className="rounded-2xl border border-line bg-surface p-8 text-content-muted">Chưa có lớp hoặc bài làm.</p>}</div>
     {deleteTarget && <Modal title={deleteTarget.id ? "Xóa bài đã nộp" : "Xóa các bài đã nộp"} onClose={() => !deleting && setDeleteTarget(null)}><p>{deleteTarget.id ? `Xóa bài đã nộp của lớp ${deleteTarget.className} trong bài kiểm tra “${deleteTarget.quizTitle}”?` : `Xóa ${deleteTarget.count} bài đã nộp của lớp ${deleteTarget.className} trong bài kiểm tra “${deleteTarget.quizTitle}”?`}</p><p className="mt-2 text-sm text-content-muted">Các bài đang làm dở được giữ nguyên. Không thể khôi phục bài đã xóa.</p><div className="mt-5 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Hủy</Button><Button type="button" onClick={() => void confirmDelete()} disabled={deleting}>Xác nhận xóa</Button></div></Modal>}
     {gradingDialog}
   </DashboardContent>;

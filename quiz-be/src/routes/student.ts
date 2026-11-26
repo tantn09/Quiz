@@ -31,9 +31,17 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
   app.get("/public/quizzes/:token", async (request, reply) => {
     const params = z.object({ token: z.string().min(20).max(80) }).safeParse(request.params);
     if (!params.success) return reply.code(404).send({ error: "not_found" });
-    const [quiz] = await db.select().from(quizzes).where(eq(quizzes.linkToken, params.data.token)).limit(1);
+    const query = z.object({ view: z.enum(["entry", "title"]).optional() }).safeParse(request.query);
+    if (!query.success) return reply.code(400).send({ error: "invalid_request" });
+    const { view } = query.data;
+    const fields = { title: quizzes.title, status: quizzes.status, linkExpiresAt: quizzes.linkExpiresAt };
+    const [quiz] = await db.select(view === "title" ? fields : {
+      ...fields, description: quizzes.description, subject: quizzes.subject, gradeLevel: quizzes.gradeLevel,
+      assignedClass: quizzes.assignedClass, ...(view === "entry" ? {} : { promptDocument: quizzes.promptDocument }),
+    }).from(quizzes).where(eq(quizzes.linkToken, params.data.token)).limit(1);
     if (!quiz || quiz.status !== "active" || (quiz.linkExpiresAt && quiz.linkExpiresAt <= new Date())) return reply.code(410).send({ error: "link_expired" });
-    return { quiz: { title: quiz.title, description: quiz.description, promptDocument: quiz.promptDocument, subject: quiz.subject, gradeLevel: quiz.gradeLevel, assignedClass: quiz.assignedClass }, questions: [] };
+    const { status, linkExpiresAt, ...entry } = quiz;
+    return view === "title" ? { quiz: entry } : { quiz: entry, questions: [] };
   });
 
   app.post("/public/quizzes/:token/start", async (request, reply) => {
@@ -48,10 +56,12 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       if (!studentClass) return { kind: "invalid" as const };
       const nameKey = identityKey(body.data.name);
       const classKey = identityKey(studentClass);
-      const roster = quiz.assignedClass ? await tx.select({ id: students.id, name: students.name, nameKey: students.nameKey }).from(students).where(and(eq(students.teacherId, quiz.teacherId), eq(students.classKey, classKey), eq(students.deleted, false))) : [];
-      const student = roster.find((member) => member.nameKey === nameKey);
-      if (roster.length && !student) return { kind: "not_listed" as const };
-      const [existing] = await tx.select().from(submissions).where(and(eq(submissions.quizId, quiz.id), or(student ? eq(submissions.studentId, student.id) : undefined, and(eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))))).limit(1);
+      const [member] = quiz.assignedClass ? await tx.select({ id: students.id, name: students.name, nameKey: students.nameKey })
+        .from(students).where(and(eq(students.teacherId, quiz.teacherId), eq(students.classKey, classKey), eq(students.deleted, false)))
+        .orderBy(sql`(${students.nameKey} = ${nameKey}) desc`).limit(1) : [];
+      if (member && member.nameKey !== nameKey) return { kind: "not_listed" as const };
+      const student = member;
+      const [existing] = await tx.select({ id: submissions.id }).from(submissions).where(and(eq(submissions.quizId, quiz.id), or(student ? eq(submissions.studentId, student.id) : undefined, and(eq(submissions.studentNameKey, nameKey), eq(submissions.studentClassKey, classKey))))).limit(1);
       if (existing) return { kind: "duplicate" as const };
       const [variant] = await tx.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.active, true), eq(quizVariants.deleted, false))).orderBy(quizVariants.assignedCount, quizVariants.code).limit(1);
       if (!variant) return { kind: "invalid" as const };
@@ -100,9 +110,14 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
       const [current] = await tx.select({ submittedAt: submissions.submittedAt, dueAt: submissions.dueAt }).from(submissions).where(eq(submissions.id, attempt.id)).for("update");
       if (!current || current.submittedAt) return "already_submitted";
       if (current.dueAt <= new Date()) return "time_expired";
-      for (const [questionId, value] of entries) {
-        await tx.insert(answers).values({ submissionId: attempt.id, questionId, answer: String(value ?? ""), updatedAt: new Date() })
-          .onConflictDoUpdate({ target: [answers.submissionId, answers.questionId], set: { answer: String(value ?? ""), updatedAt: new Date() } });
+      if (entries.length) {
+        const updatedAt = new Date();
+        await tx.insert(answers).values(entries.map(([questionId, value]) => ({
+          submissionId: attempt.id, questionId, answer: String(value ?? ""), updatedAt,
+        }))).onConflictDoUpdate({
+          target: [answers.submissionId, answers.questionId],
+          set: { answer: sql`excluded.answer`, updatedAt },
+        });
       }
       return null;
     });
@@ -123,18 +138,23 @@ export async function studentRoutes(app: FastifyInstance): Promise<void> {
     const submitted = await db.transaction(async (tx) => {
       const [current] = await tx.select({ submittedAt: submissions.submittedAt }).from(submissions).where(eq(submissions.id, attempt.id)).for("update");
       if (!current || current.submittedAt) return false;
-      for (const [questionId, value] of entries) {
-        const question = byId.get(questionId)!;
-        if (question.type === "essay") {
-          await tx.insert(answers).values({ submissionId: attempt.id, questionId, answer: String(value ?? ""), awardedPoints: null, isCorrect: null, updatedAt: new Date() })
-            .onConflictDoUpdate({ target: [answers.submissionId, answers.questionId], set: { answer: String(value ?? ""), updatedAt: new Date() } });
-        } else {
-          const isCorrect = value !== null && value !== "" && Number(value) === question.correctOption;
-          const score = isCorrect ? question.points : 0;
-          autoScore += score;
-          await tx.insert(answers).values({ submissionId: attempt.id, questionId, answer: String(value ?? ""), awardedPoints: score, isCorrect, updatedAt: new Date() })
-            .onConflictDoUpdate({ target: [answers.submissionId, answers.questionId], set: { answer: String(value ?? ""), awardedPoints: score, isCorrect, updatedAt: new Date() } });
-        }
+      if (entries.length) {
+        const updatedAt = new Date();
+        const rows = entries.map(([questionId, value]) => {
+          const question = byId.get(questionId)!;
+          const isCorrect = question.type === "essay" ? null : value !== null && value !== "" && Number(value) === question.correctOption;
+          const awardedPoints = isCorrect === null ? null : isCorrect ? question.points : 0;
+          autoScore += awardedPoints ?? 0;
+          return { submissionId: attempt.id, questionId, answer: String(value ?? ""), awardedPoints, isCorrect, updatedAt };
+        });
+        await tx.insert(answers).values(rows).onConflictDoUpdate({
+          target: [answers.submissionId, answers.questionId],
+          set: {
+            answer: sql`excluded.answer`, updatedAt,
+            awardedPoints: sql`case when excluded.is_correct is null then ${answers.awardedPoints} else excluded.awarded_points end`,
+            isCorrect: sql`case when excluded.is_correct is null then ${answers.isCorrect} else excluded.is_correct end`,
+          },
+        });
       }
       await tx.update(submissions).set({ submittedAt: new Date(), score: autoScore, gradingStatus: hasEssay ? "needs_review" : "graded" }).where(and(eq(submissions.id, attempt.id), isNull(submissions.submittedAt)));
       return true;

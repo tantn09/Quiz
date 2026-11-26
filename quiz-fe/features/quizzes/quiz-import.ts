@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api-request";
-import type { PromptDocument } from "@/components/prompt-editor";
+import type { PromptDocument } from "@/lib/prompt-document";
 
 export type ImportIssue = { sheet: string; row: number; column: string; message: string };
 export type ImportDraft = { title: string; description: string; promptDocument: PromptDocument; durationMinutes: number; linkExpiresAt: string | null; questions: { type: "choice" | "essay"; prompt: string; points: number; options: string[]; correctOption: number | null }[] };

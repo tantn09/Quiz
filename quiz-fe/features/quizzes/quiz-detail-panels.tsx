@@ -1,9 +1,11 @@
 import { NativeSelect } from "@/components/ui/field";
-import { PromptView } from "@/components/prompt-view";
+import dynamic from "next/dynamic";
 import { QuizVariants } from "@/components/quiz-variants";
 import { useTranslation } from "@/lib/i18n";
-import type { PromptDocument } from "@/components/prompt-editor";
+import type { PromptDocument } from "@/lib/prompt-document";
 import type { QuizRow } from "./quiz-controls";
+
+const PromptView = dynamic(() => import("@/components/prompt-view").then((module) => module.PromptView), { ssr: false });
 
 type DetailQuestion = { id: string; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number };
 export type QuizDetail = { quiz: QuizRow & { promptDocument?: PromptDocument }; questions: DetailQuestion[]; variants: { id: string; code: number; active: boolean; questions: DetailQuestion[] }[] };

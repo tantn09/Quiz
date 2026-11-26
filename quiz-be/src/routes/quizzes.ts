@@ -54,12 +54,20 @@ async function hasAssets(document: z.infer<typeof promptDocumentSchema>): Promis
 
 export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.get("/teacher/quizzes", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
-    const parsed = z.object({ search: z.string().trim().max(100).optional(), status: z.enum(["active", "inactive"]).optional() }).safeParse(request.query);
+    const parsed = z.object({ view: z.literal("list").optional(), search: z.string().trim().max(100).optional(), status: z.enum(["active", "inactive"]).optional() }).safeParse(request.query);
     if (!parsed.success) return reply.code(400).send(validationError(parsed.error, "query"));
     const filters = [ne(quizzes.status, "deleted")];
     if (request.authUser!.role !== "admin") filters.push(eq(quizzes.teacherId, request.authUser!.id));
     if (parsed.data.status) filters.push(eq(quizzes.status, parsed.data.status));
     if (parsed.data.search) filters.push(or(ilike(quizzes.title, `%${parsed.data.search}%`), ilike(quizzes.description, `%${parsed.data.search}%`))!);
+    if (parsed.data.view === "list") {
+      const rows = await db.select({
+        id: quizzes.id, title: quizzes.title, description: quizzes.description, status: quizzes.status,
+        durationMinutes: quizzes.durationMinutes, linkToken: quizzes.linkToken, linkExpiresAt: quizzes.linkExpiresAt,
+        subject: quizzes.subject, gradeLevel: quizzes.gradeLevel, assignedClass: quizzes.assignedClass,
+      }).from(quizzes).where(and(...filters)).orderBy(desc(quizzes.createdAt));
+      return { quizzes: rows };
+    }
     const rows = await db.select().from(quizzes).where(filters.length ? and(...filters) : undefined).orderBy(desc(quizzes.createdAt));
     return { quizzes: rows };
   });
@@ -93,6 +101,11 @@ export async function quizRoutes(app: FastifyInstance): Promise<void> {
   app.get("/teacher/quizzes/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send(validationError(params.error, "params"));
+    if ((request.query as { view?: string }).view === "title") {
+      const [quiz] = await db.select({ title: quizzes.title }).from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
+      if (!quiz) return reply.code(404).send({ error: "not_found" });
+      return { quiz };
+    }
     const [quiz] = await db.select().from(quizzes).where(and(eq(quizzes.id, params.data.id), ne(quizzes.status, "deleted"), request.authUser!.role === "admin" ? undefined : eq(quizzes.teacherId, request.authUser!.id))).limit(1);
     if (!quiz) return reply.code(404).send({ error: "not_found" });
     const variants = await db.select().from(quizVariants).where(and(eq(quizVariants.quizId, quiz.id), eq(quizVariants.deleted, false))).orderBy(quizVariants.code);

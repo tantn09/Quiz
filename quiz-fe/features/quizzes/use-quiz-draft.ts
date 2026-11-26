@@ -2,7 +2,7 @@ import { useTranslation } from "@/lib/i18n";
 import { apiFetch, reportApiError } from "@/lib/api-request";
 import { useErrorToast } from "@/components/ui/toast";
 import { useEffect, useState } from "react";
-import { promptImages, type PromptDocument } from "@/components/prompt-editor";
+import { promptImages, type PromptDocument } from "@/lib/prompt-document";
 import type { QuestionDraft } from "./quiz-controls";
 
 export type SavedDraft = { savedAt: number; title: string; description: string; promptDocument: PromptDocument; duration: number; expiresAt: string; subject: string; gradeLevel: string; questions: QuestionDraft[] };

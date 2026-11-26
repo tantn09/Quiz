@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import type { FastifyInstance } from "fastify";
-import { and, desc, eq, ilike, inArray, isNotNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNotNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
@@ -13,33 +13,50 @@ function ownerFilter(user: { id: string; role: string }) {
 export async function resultRoutes(app: FastifyInstance): Promise<void> {
   app.get("/teacher/results/summary", { preHandler: [requireTeacherAccess] }, async (request) => {
     const owner = ownerFilter(request.authUser!);
-    const quizRows = await db.select({ id: quizzes.id, title: quizzes.title, assignedClass: quizzes.assignedClass }).from(quizzes).where(and(owner, ne(quizzes.status, "deleted"))).orderBy(quizzes.title);
-    const attemptRows = await db.select({ quizId: submissions.quizId, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, gradingStatus: submissions.gradingStatus }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(and(owner, ne(quizzes.status, "deleted")));
-    const groups = new Map<string, { quizId: string; quizTitle: string; className: string; inProgress: number; submitted: number; needsReview: number; graded: number }>();
-    for (const quiz of quizRows) if (quiz.assignedClass) groups.set(`${quiz.id}\u0000${quiz.assignedClass}`, { quizId: quiz.id, quizTitle: quiz.title, className: quiz.assignedClass, inProgress: 0, submitted: 0, needsReview: 0, graded: 0 });
-    for (const row of attemptRows) {
-      const quiz = quizRows.find((item) => item.id === row.quizId);
-      if (!quiz) continue;
-      const key = `${quiz.id}\u0000${row.studentClass}`;
-      let group = groups.get(key);
-      if (!group) { group = { quizId: quiz.id, quizTitle: quiz.title, className: row.studentClass, inProgress: 0, submitted: 0, needsReview: 0, graded: 0 }; groups.set(key, group); }
-      if (!row.submittedAt) group.inProgress++;
-      else { group.submitted++; if (row.gradingStatus === "graded") group.graded++; else group.needsReview++; }
+    const visible = and(owner, ne(quizzes.status, "deleted"));
+    const [quizRows, counts] = await Promise.all([
+      db.select({ id: quizzes.id, title: quizzes.title, assignedClass: quizzes.assignedClass }).from(quizzes).where(visible),
+      db.select({
+        quizId: quizzes.id, quizTitle: quizzes.title, className: submissions.studentClass,
+        inProgress: sql<number>`count(*) filter (where ${submissions.submittedAt} is null)`.mapWith(Number),
+        submitted: sql<number>`count(${submissions.submittedAt})`.mapWith(Number),
+        needsReview: sql<number>`count(*) filter (where ${submissions.submittedAt} is not null and ${submissions.gradingStatus} <> 'graded')`.mapWith(Number),
+        graded: sql<number>`count(*) filter (where ${submissions.submittedAt} is not null and ${submissions.gradingStatus} = 'graded')`.mapWith(Number),
+      }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(visible)
+        .groupBy(quizzes.id, quizzes.title, submissions.studentClass),
+    ]);
+    const groups = new Map(counts.map((row) => [JSON.stringify([row.quizId, row.className]), row]));
+    for (const quiz of quizRows) {
+      if (!quiz.assignedClass) continue;
+      const key = JSON.stringify([quiz.id, quiz.assignedClass]);
+      if (!groups.has(key)) groups.set(key, { quizId: quiz.id, quizTitle: quiz.title, className: quiz.assignedClass, inProgress: 0, submitted: 0, needsReview: 0, graded: 0 });
     }
     return { groups: [...groups.values()].sort((a, b) => a.className.localeCompare(b.className, "vi") || a.quizTitle.localeCompare(b.quizTitle, "vi")) };
   });
 
   app.get("/teacher/results", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
-    const query = z.object({ quizId: z.string().uuid().optional(), className: z.string().trim().max(80).optional(), search: z.string().trim().max(100).optional(), gradingStatus: z.enum(["pending", "needs_review", "graded"]).optional() }).safeParse(request.query);
+    const query = z.object({ scope: z.literal("group").optional(), quizId: z.string().uuid().optional(), className: z.string().max(80).optional(), search: z.string().trim().max(100).optional(), gradingStatus: z.enum(["pending", "needs_review", "graded"]).optional() }).safeParse(request.query);
     if (!query.success) return reply.code(400).send({ error: "invalid_request" });
     const filters = [];
     const owner = ownerFilter(request.authUser!);
     if (owner) filters.push(owner);
     if (query.data.quizId) filters.push(eq(quizzes.id, query.data.quizId));
-    if (query.data.className) filters.push(eq(submissions.studentClass, query.data.className));
+    if (!query.data.scope && query.data.className?.trim()) filters.push(eq(submissions.studentClass, query.data.className.trim()));
     if (query.data.gradingStatus) filters.push(eq(submissions.gradingStatus, query.data.gradingStatus));
     if (query.data.search) filters.push(or(ilike(submissions.studentName, `%${query.data.search}%`), ilike(submissions.studentClass, `%${query.data.search}%`), ilike(quizzes.title, `%${query.data.search}%`))!);
-    const rows = await db.select({ id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title, variantCode: quizVariants.code, questionSnapshot: submissions.questionSnapshot })
+    const fields = { id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title, variantCode: quizVariants.code };
+    if (query.data.scope === "group") {
+      if (!query.data.quizId || query.data.className === undefined) return reply.code(400).send({ error: "invalid_request" });
+      const results = await db.select({
+        ...fields,
+        maxScore: sql<number>`coalesce((select sum((item->>'points')::numeric) from jsonb_array_elements(${submissions.questionSnapshot}) as item), 0)`.mapWith(Number),
+      }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id))
+        .innerJoin(quizVariants, eq(submissions.variantId, quizVariants.id))
+        .where(and(...filters, eq(submissions.studentClass, query.data.className), ne(quizzes.status, "deleted")))
+        .orderBy(desc(submissions.submittedAt));
+      return { results };
+    }
+    const rows = await db.select({ ...fields, questionSnapshot: submissions.questionSnapshot })
       .from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).innerJoin(quizVariants, eq(submissions.variantId, quizVariants.id)).where(filters.length ? and(...filters) : undefined).orderBy(desc(submissions.submittedAt));
     const quizList = await db.select({ id: quizzes.id, title: quizzes.title }).from(quizzes).where(owner);
     const classes = await db.selectDistinct({ quizId: quizzes.id, name: submissions.studentClass }).from(submissions).innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(owner);

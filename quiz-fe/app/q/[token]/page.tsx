@@ -6,4 +6,6 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
   return quizMetadata("/public/quizzes/" + encodeURIComponent((await params).token));
 }
 
-export default StudentQuizPage;
+export default async function Page({ params }: { params: Promise<{ token: string }> }) {
+  return <StudentQuizPage key={(await params).token} />;
+}

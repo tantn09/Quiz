@@ -20,13 +20,16 @@ import { useQuizLink } from "@/features/quizzes/use-quiz-link";
 import { QuizEditorForm } from "@/features/quizzes/quiz-editor-form";
 import { QuizList } from "@/features/quizzes/quiz-list";
 import { Select } from "@/components/ui/select";
-import { PromptEditor, emptyPrompt, type PromptDocument } from "@/components/prompt-editor";
+import { emptyPrompt, type PromptDocument } from "@/lib/prompt-document";
+import dynamic from "next/dynamic";
 import { DragDropProvider } from "@dnd-kit/react";
 import { isSortable } from "@dnd-kit/react/sortable";
 
 
 type CatalogItem = { id: string; name: string };
 const emptyQuestion = (): QuestionDraft => ({ id: crypto.randomUUID(), type: "choice", prompt: "", options: ["", ""], correctOption: -1, points: 1 });
+const PromptEditor = dynamic(() => import("@/components/prompt-editor").then((module) => module.PromptEditor), { ssr: false });
+
 export default function TeacherPage({ mode = "list", admin }: { admin: boolean; mode?: "list" | "create" | "view" | "edit" }) {
   const quizPath = admin ? "/admin/quiz" : "/teacher/quiz";
   const resultsPath = admin ? "/admin/results" : "/teacher/results";
@@ -91,7 +94,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
       const query = new URLSearchParams();
       if (search) query.set("search", search);
       if (status) query.set("status", status);
-      const response = await apiFetch(`/api/teacher/quizzes?${query}`, { cache: "no-store", signal });
+      const response = await apiFetch(`/api/teacher/quizzes?view=list&${query}`, { cache: "no-store", signal });
 
       setQuizzes((await response.json()).quizzes);
     } catch (error) { reportApiError(error, "Không tải được danh sách bài kiểm tra.", t, showError); }
@@ -366,7 +369,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
       <div id="quiz-questions" className="scroll-mt-6 border-t border-line pt-6"><h3 className="flex items-center gap-3 text-lg font-bold">{t("Câu hỏi")}</h3><p className="mt-1 text-sm text-content-muted">{t("Chọn loại câu hỏi, nhập nội dung và đáp án bên dưới.")}</p></div>
       <DragDropProvider onDragEnd={(event) => { if (event.canceled || !isSortable(event.operation.source)) return; const { initialIndex, index } = event.operation.source; if (initialIndex === index) return; setQuestions((current) => { const next = [...current]; const [moved] = next.splice(initialIndex, 1); next.splice(index, 0, moved); return next; }); setQuestionError(null); setFormError(""); setFormErrorTarget(""); }}><div className="space-y-4">{questions.map((question, index) => <QuestionEditor key={question.id} question={question} index={index} count={questions.length} collapsed={collapsedQuestionIds.has(question.id)} toggle={() => toggleQuestion(question.id)} duplicate={() => duplicateQuestion(index)} error={questionError === index ? questionErrorMessage : undefined} t={t} update={(changes) => updateQuestion(index, changes)} remove={() => { setQuestions((items) => items.filter((_, i) => i !== index)); setQuestionError(null); }} />)}</div></DragDropProvider>
       <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("choice")}>{t("+ Câu trắc nghiệm")}</Button><Button type="button" variant="outline" disabled={questions.length >= 200} onClick={() => addQuestion("essay")}>{t("+ Câu tự luận")}</Button></div>
-      <details id="quiz-prompt" className="scroll-mt-6 border-t border-line pt-4" open={promptOpen} onToggle={(event) => setPromptOpen(event.currentTarget.open)}><summary className="min-h-11 cursor-pointer content-center rounded-xl font-semibold hover:text-brand">{t("Đề bài (tùy chọn)")}</summary><div className="mt-4"><PromptEditor value={promptDocument} onChange={setPromptDocument} /></div></details>
+      <details id="quiz-prompt" className="scroll-mt-6 border-t border-line pt-4" open={promptOpen} onToggle={(event) => setPromptOpen(event.currentTarget.open)}><summary className="min-h-11 cursor-pointer content-center rounded-xl font-semibold hover:text-brand">{t("Đề bài (tùy chọn)")}</summary><div className="mt-4">{promptOpen && <PromptEditor value={promptDocument} onChange={setPromptDocument} />}</div></details>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4"><p className="text-sm text-content-muted">{questions.length} {t("câu hỏi")}</p><div className="ml-auto flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" onClick={closeForm} disabled={busy || importBusy}>{t("Hủy")}</Button><Button type="submit" disabled={busy || uploading || importBusy}>{busy ? t("Đang lưu…") : editing ? t("Lưu thay đổi") : t("Tạo bài kiểm tra")}</Button></div></div>
     </QuizEditorForm></QuizSurface>}
     {mode === "list" && <QuizList quizzes={quizzes} search={search} setSearch={setSearch} status={status} setStatus={setStatus}

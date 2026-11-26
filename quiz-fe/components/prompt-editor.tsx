@@ -3,7 +3,7 @@
 import { apiFetch, reportApiError } from "@/lib/api-request";
 import { useErrorToast } from "@/components/ui/toast";
 import { useEffect, useRef, useState } from "react";
-import { useEditor, type JSONContent } from "@tiptap/react";
+import { useEditor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
@@ -19,18 +19,18 @@ import { useTranslation } from "@/lib/i18n";
 import { RichTextEditor } from "@mantine/tiptap";
 import { ImagePlus, Link2, Table2 } from "lucide-react";
 
-export type PromptDocument = JSONContent;
-export const emptyPrompt: PromptDocument = { type: "doc", content: [] };
-export function promptImages(document: PromptDocument): string[] {
-  const ids: string[] = [];
-  const walk = (node: JSONContent) => { if (node.type === "image" && typeof node.attrs?.src === "string") ids.push(node.attrs.src.split("/").pop()!); node.content?.forEach(walk); };
-  walk(document);
-  return [...new Set(ids)];
+import { AppMantineProvider } from "@/components/mantine-theme";
+import type { PromptDocument } from "@/lib/prompt-document";
+import "@mantine/core/styles.css";
+import "@mantine/tiptap/styles.css";
+
+export function PromptEditor(props: { value: PromptDocument; onChange: (value: PromptDocument) => void }) {
+  return <AppMantineProvider><Editor {...props} /></AppMantineProvider>;
 }
 
 const extensions = [StarterKit, Image, Link.configure({ openOnClick: false }), TextAlign.configure({ types: ["heading", "paragraph"] }), TableKit, TextStyle, Color, Underline];
 
-export function PromptEditor({ value, onChange }: { value: PromptDocument; onChange: (value: PromptDocument) => void }) {
+function Editor({ value, onChange }: { value: PromptDocument; onChange: (value: PromptDocument) => void }) {
   const showError = useErrorToast();
   const t = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
