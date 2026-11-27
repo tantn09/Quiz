@@ -52,7 +52,12 @@ for (const service of services) {
     console.log(`docker ${args.join(" ")}`);
     continue;
   }
-  const result = spawnSync("docker", args, { cwd: root, stdio: "inherit" });
+  const spawnOptions = { cwd: root, stdio: "inherit" };
+  let result = spawnSync("docker", args, spawnOptions);
+  if (process.platform === "win32" && result.error?.code === "ENOENT") {
+    // Windows batch wrappers need cmd.exe. The build arguments are fixed or validated above.
+    result = spawnSync("cmd.exe", ["/d", "/c", "docker", ...args], spawnOptions);
+  }
   if (result.error) throw result.error;
   if (result.status !== 0) throw new Error(`Publishing ${image} failed with exit code ${result.status}`);
 }

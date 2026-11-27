@@ -192,8 +192,25 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     if (expiresAt && Number.isNaN(new Date(expiresAt).getTime())) { setFormError(t("Định dạng ngày giờ chưa hợp lệ.")); setFormErrorTarget("quiz-info"); document.getElementById("quiz-info")?.scrollIntoView({ behavior: "smooth" }); return; }
     if (mode === "create" && expiresAt && new Date(expiresAt) <= new Date()) { setFormError(t("Hạn link phải ở tương lai.")); setFormErrorTarget("quiz-info"); document.getElementById("quiz-info")?.scrollIntoView({ behavior: "smooth" }); return; }
     if (!subject || !gradeLevel) { setFormError(t("Chọn môn học và khối lớp.")); setFormErrorTarget("quiz-classes"); document.getElementById("quiz-classes")?.scrollIntoView({ behavior: "smooth" }); return; }
-    const invalidPrompt = questions.findIndex((question) => !question.prompt.trim() || !Number.isInteger(question.points) || question.points < 0 || question.points > 1000);
-    if (invalidPrompt !== -1) { const message = t("Nhập nội dung câu hỏi và điểm từ 0 đến 1000."); setQuestionError(invalidPrompt); setQuestionErrorMessage(message); setCollapsedQuestionIds((current) => { const next = new Set(current); next.delete(questions[invalidPrompt].id); return next; }); setFormError(`${t("Câu")} ${invalidPrompt + 1}: ${message}`); setFormErrorTarget(`question-${invalidPrompt}`); document.getElementById(`question-${invalidPrompt}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
+    const invalidPrompt = questions.findIndex(({ prompt, points }) => !prompt.trim() || !Number.isInteger(points * 4) || points < 0 || points > 1000);
+    if (invalidPrompt !== -1) {
+      const question = questions[invalidPrompt];
+      const message = question.prompt.trim()
+        ? t("Nhập điểm từ 0 đến 1000 theo bước 0,25.")
+        : t("Nhập nội dung câu hỏi.");
+      const target = `question-${invalidPrompt}`;
+      setQuestionError(invalidPrompt);
+      setQuestionErrorMessage(message);
+      setCollapsedQuestionIds((current) => {
+        const next = new Set(current);
+        next.delete(question.id);
+        return next;
+      });
+      setFormError(`${t("Câu")} ${invalidPrompt + 1}: ${message}`);
+      setFormErrorTarget(target);
+      document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     const invalidQuestion = questions.findIndex((question) => question.type === "choice" && (question.options.length < 2 || question.options.length > 8 || question.options.some((option) => !option.trim()) || question.correctOption < 0 || question.correctOption >= question.options.length));
     if (invalidQuestion !== -1) { const message = t("Nhập đầy đủ từ 2 đến 8 đáp án và chọn đáp án đúng."); setQuestionError(invalidQuestion); setQuestionErrorMessage(message); setCollapsedQuestionIds((current) => { const next = new Set(current); next.delete(questions[invalidQuestion].id); return next; }); setFormError(`${t("Câu")} ${invalidQuestion + 1}: ${message}`); setFormErrorTarget(`question-${invalidQuestion}`); document.getElementById(`question-${invalidQuestion}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); return; }
     setQuestionError(null);

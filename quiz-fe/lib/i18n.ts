@@ -418,6 +418,8 @@ const english: Record<string, string> = {
   "Lưu và tiếp tục": "Save and continue",
   "Không lưu được điểm. Hãy thử lại.": "Could not save the score. Try again.",
   "Nhập điểm theo bước 0.25 và trong giới hạn của câu.": "Enter a score in increments of 0.25 within the question limit.",
+  "Nhập nội dung câu hỏi.": "Enter the question text.",
+  "Nhập điểm từ 0 đến 1000 theo bước 0,25.": "Enter points from 0 to 1000 in increments of 0.25.",
   "Lớp được giao": "Assigned class",
   "Chọn bộ môn": "Select a subject",
   "Chọn nơi công tác": "Select a workplace",

@@ -112,6 +112,10 @@ html[data-theme="dark"] select:not(.quiz-select-trigger) { background-image: url
 .quiz-select-trigger { border-radius: var(--radius-control); background: var(--surface); box-shadow: 0 1px 2px var(--shadow-color); }
 .quiz-select-trigger:is([data-state="open"], [aria-expanded="true"]) { border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 16%, transparent); }
 .quiz-select-content { border-radius: 1rem; background: var(--surface); box-shadow: 0 16px 38px -18px var(--shadow-color); }
+.quiz-richtext { color: var(--foreground); }
+/* The original inline color stays available to Tiptap when copying and pasting. */
+.quiz-richtext [data-prompt-color] { color: var(--prompt-color-light) !important; }
+html[data-theme="dark"] .quiz-richtext [data-prompt-color] { color: var(--prompt-color-dark) !important; }
 .quiz-richtext .tiptap { min-height: 9rem; outline: none; }
 .quiz-richtext .tiptap:focus-visible { outline: none; }
 .quiz-richtext p { margin: .65rem 0; line-height: 1.7; }
