@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/field";
 
 type Question = { id: string; position: number; type: "choice" | "essay"; prompt: string; options: string[]; correctOption: number | null; points: number };
 type Answer = { questionId: string; answer: string | null; awardedPoints: number | null; isCorrect: boolean | null };
-type Detail = { submission: { id: string; studentName: string; studentClass: string; quizTitle: string; score: number | null; maxScore: number; variantCode: number; gradingStatus: string; questionSnapshot: Question[] }; answers: Answer[] };
+type Detail = { submission: { departureCount: number; departureLimitSubmitted: boolean; id: string; studentName: string; studentClass: string; quizTitle: string; score: number | null; maxScore: number; variantCode: number; gradingStatus: string; questionSnapshot: Question[] }; answers: Answer[] };
 
 export function useGradingDialog(load: () => Promise<void>, setNotice: (message: string) => void) {
   const t = useTranslation();
@@ -79,6 +79,8 @@ export function useGradingDialog(load: () => Promise<void>, setNotice: (message:
 
   const gradingDialog = detail && question && <Modal closeLabel={t("Đóng")} title={detail.submission.studentName + " · " + detail.submission.studentClass} onClose={() => !grading && setDetail(null)}>
       <p aria-live="polite" className="mb-4 text-sm text-content-muted">{detail.submission.quizTitle} · {t("Mã đề")} {detail.submission.variantCode} · {detail.submission.score ?? "—"}/{detail.submission.maxScore}</p>
+      <p className="mb-4 text-sm">{t("Số lần rời trang")} · {detail.submission.departureCount}</p>
+      {detail.submission.departureLimitSubmitted && <p className="ds-error mb-4 rounded-lg p-3 font-semibold">{t("Tự nộp do rời trang 3 lần")}</p>}
       <form onSubmit={saveGrade} className="space-y-4">
         <h3 id="grading-question" tabIndex={-1} className="font-semibold">{t("Câu")} {index + 1}/{detail.submission.questionSnapshot.length} · {question.points} {t("điểm")}</h3>
         <p className="whitespace-pre-wrap">{question.prompt}</p>

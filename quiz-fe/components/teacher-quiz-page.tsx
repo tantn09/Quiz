@@ -68,7 +68,8 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
   const [questionErrorMessage, setQuestionErrorMessage] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importErrors, setImportErrors] = useState<ImportIssue[]>([]);
-  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importSelection, setImportSelection] = useState<File | null>(null);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [notice, setNotice] = useState("");
@@ -167,7 +168,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     setImportBusy(true); setImportErrors([]);
     try {
       const { draft } = await previewQuizImport(file);
-      if (mode === "list") { sessionStorage.setItem("quiz-import-draft", JSON.stringify(draft)); router.push(quizPath + "/new"); return; }
+      if (mode === "list") { sessionStorage.setItem("quiz-import-draft", JSON.stringify(draft)); router.push(quizPath + "/new"); setImportOpen(false); return; }
       setSubject(""); setGradeLevel("");
       setTitle(draft.title); setDescription(draft.description); setPromptDocument(draft.promptDocument ?? emptyPrompt); setPromptOpen(Boolean(draft.promptDocument?.content?.length)); setDuration(draft.durationMinutes);
       setExpiresAt(draft.linkExpiresAt ? new Date(new Date(draft.linkExpiresAt).getTime() - new Date(draft.linkExpiresAt).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
@@ -176,8 +177,7 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
       setImportErrors([]); setFormError(""); setEditing(null); setFormOpen(true);
     } catch (error) {
       const issues = error instanceof ApiError ? error.payload.errors : undefined;
-      if (Array.isArray(issues)) setImportErrors(issues);
-      reportApiError(error, "Không đọc được file nhập.", t, showError);
+      setImportErrors(Array.isArray(issues) && issues.length ? issues : [{ sheet: "File", row: 0, column: "file", message: "Không đọc được file nhập." }]);
     }
     finally { setImportBusy(false); }
   }
@@ -355,10 +355,31 @@ export default function TeacherPage({ mode = "list", admin }: { admin: boolean; 
     || (!detailError && (mode === "edit" && !formOpen || mode === "view" && !detail))) return <DashboardLoading />;
 
   return <DashboardContent compact={mode === "create"}>
-    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" disabled={importBusy} onClick={() => importInputRef.current?.click()}>{importBusy ? t("Đang đọc file…") : t("Nhập Word hoặc Excel")}</Button><Button type="button" variant="outline" onClick={() => void downloadTemplate()}>{t("Tải Excel mẫu")}</Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
+    {mode === "list" && <PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={t(admin ? "Bài kiểm tra" : "Bài kiểm tra của tôi")} description={t("Tạo bài, gửi link cho học sinh và theo dõi tiến độ.")} action={<div className="flex flex-wrap gap-3"><Button type="button" onClick={newQuiz}>{t("Tạo bài kiểm tra mới")}</Button><Button type="button" variant="outline" onClick={() => { setImportSelection(null); setImportErrors([]); setImportOpen(true); }}>{t("Nhập Word hoặc Excel")}</Button><Button asChild variant="outline"><Link href={resultsPath}>{t("Xem kết quả")}</Link></Button></div>} />}
     {mode !== "list" && <div className={mode === "create" ? "px-[calc(1.25rem+1px)] sm:px-[calc(2rem+1px)]" : undefined}><PageHeader eyebrow={t(admin ? "QUẢN TRỊ" : "GIÁO VIÊN")} title={mode === "create" ? t("Tạo bài kiểm tra mới") : mode === "edit" ? t("Sửa bài kiểm tra") : t("Chi tiết bài kiểm tra")} description={mode === "create" ? t("Điền thông tin, thêm câu hỏi rồi tạo bài kiểm tra.") : undefined} action={<Button asChild variant="outline"><Link href={quizPath}>{t("Về danh sách bài kiểm tra")}</Link></Button>} /></div>}
-    <Input ref={importInputRef} type="file" accept=".docx,.xlsx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { void importFile(event.target.files?.[0]); event.target.value = ""; }} className="sr-only" tabIndex={-1} aria-hidden="true" />
-    {mode === "list" && importErrors.length > 0 && <div role="alert" className="mt-5 rounded-xl ds-error p-4 text-sm"><p className="font-semibold">{t("File nhập có lỗi:")}</p><ul className="mt-2 list-disc pl-5">{importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? ` · ${t(issue.sheet === "Word" ? "đoạn" : "dòng")} ${issue.row}` : ""} · {issue.column}: {t(issue.message)}</li>)}</ul></div>}
+    {importOpen && <Modal title={t("Nhập Word hoặc Excel")} closeLabel={t("Đóng")} onClose={() => { if (!importBusy) setImportOpen(false); }}>
+      <div className="space-y-4">
+        <p className="text-sm text-content-muted">{t("Chọn file Word hoặc Excel tối đa 2 MB.")}</p>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline" size="sm"><a href="/templates/quiz-import-template.docx" download>{t("Tải Word mẫu")}</a></Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => void downloadTemplate()}>{t("Tải Excel mẫu")}</Button>
+        </div>
+        <label className="block text-sm font-medium">{t("Chọn file Word hoặc Excel")}
+          <Input disabled={importBusy} type="file" accept=".docx,.xlsx" className="mt-2" onChange={(event) => {
+            setImportSelection(event.currentTarget.files?.[0] ?? null);
+            setImportErrors([]);
+          }} />
+        </label>
+        {importBusy && <p role="status" className="text-sm text-content-muted">{t("Đang đọc file…")}</p>}
+        {importErrors.length > 0 && <Alert tone="error"><p className="font-semibold">{t("File nhập có lỗi:")}</p><ul className="max-h-48 list-disc space-y-1 overflow-y-auto pl-5">
+          {importErrors.map((issue, index) => <li key={index}>{issue.sheet}{issue.row ? " · " + t(issue.sheet === "Word" ? "đoạn" : "dòng") + " " + issue.row : ""} · {issue.column}: {t(issue.message)}</li>)}
+        </ul></Alert>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" variant="outline" disabled={importBusy} onClick={() => setImportOpen(false)}>{t("Hủy")}</Button>
+          <Button type="button" disabled={importBusy || !importSelection} onClick={() => { if (importSelection) void importFile(importSelection); }}>{t("Xác nhận nhập")}</Button>
+        </div>
+      </div>
+    </Modal>}
     {notice && <Alert className="mt-5 break-words">{notice}</Alert>}
     {(detailQuiz || mode === "view") && !detailError && <QuizSurface fullPage={mode !== "list"} title={t("Chi tiết bài kiểm tra")} onClose={() => setDetailQuiz(null)}>
       {!detail && <DashboardLoading />}

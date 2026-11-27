@@ -92,6 +92,20 @@
       "when": 1794900000007,
       "tag": "0012_workplaces",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1795745144907,
+      "tag": "0013_attempt_departures",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795745711408,
+      "tag": "0014_departure_limit",
+      "breakpoints": true
     }
   ]
 }

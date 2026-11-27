@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { TriangleAlert } from "lucide-react";
 import dynamic from "next/dynamic";
 import { AssessmentLayout } from "@/components/page-layouts";
 import { Modal } from "@/components/modal";
@@ -66,12 +67,37 @@ export function AssessmentProgress({ answered, total, dueAt, onExpire }: {
   return <div className="quiz-student-status sticky top-3 z-10 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-surface px-4 py-3 shadow-sm"><span className="text-sm font-semibold text-content-muted">{t("Đã trả lời")} <strong className="ml-1 rounded-full bg-surface-accent px-2.5 py-1 text-brand">{answered}/{total}</strong></span><Countdown dueAt={dueAt} onExpire={onExpire} /></div>;
 }
 
-export function AssessmentRun({ questions, answers, setAnswer, onSubmit }: {
+export function AssessmentRun({ questions, answers, setAnswer, onSubmit, departureDueAt, onDeparture, departureLimitEnabled }: {
   questions: QuizQuestion[]; answers: Record<string, string>;
   setAnswer: (id: string, value: string) => void; onSubmit: () => void;
+  departureDueAt?: string;
+  onDeparture?: () => number;
+  departureLimitEnabled?: boolean;
 }) {
   const t = useTranslation();
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const [departureWarning, setDepartureWarning] = useState(0);
+  useEffect(() => {
+    if (!departureDueAt || !onDeparture) return;
+    const deadline = Date.parse(departureDueAt);
+    let wasHidden = document.hidden;
+    let departures = 0;
+    const handleVisibility = () => {
+      const hidden = document.hidden;
+      if (hidden === wasHidden) return;
+      wasHidden = hidden;
+      if (Date.now() >= deadline) return;
+      if (hidden) {
+        departures = onDeparture();
+      } else if (departures) {
+        setConfirmSubmit(false);
+        setDepartureWarning(departures);
+        departures = 0;
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [departureDueAt, onDeparture]);
   const [questionIndex, setQuestionIndex] = useState(0);
   const remaining = questions.filter((question) => !answers[question.id]?.trim()).length;
   const index = Math.min(questionIndex, Math.max(0, questions.length - 1));
@@ -81,6 +107,15 @@ export function AssessmentRun({ questions, answers, setAnswer, onSubmit }: {
   }
   return <>
     <AssessmentQuestions questions={questions} answers={answers} questionIndex={index} currentQuestion={questions[index]} moveToQuestion={moveToQuestion} setAnswer={setAnswer} confirm={() => setConfirmSubmit(true)} />
+    {departureWarning > 0 && <Modal portal closeLabel={t("Đóng")} onClose={() => setDepartureWarning(0)} title={t("Cảnh báo rời trang làm bài")}>
+      <div className="ds-error space-y-2 rounded-xl p-4">
+        <TriangleAlert size={24} aria-hidden="true" />
+        {departureLimitEnabled && <p className="font-bold">{t("Số lần rời trang")} {departureWarning}/3</p>}
+        {!departureLimitEnabled && <p>{t("Lượt này chưa áp dụng quy định tự nộp sau 3 lần rời trang.")}</p>}
+        <p>{t("Bạn vừa rời trang làm bài. Vui lòng ở lại trang. Thời gian làm bài vẫn tiếp tục.")}</p>
+      </div>
+      <div className="mt-5 flex justify-end"><Button type="button" onClick={() => setDepartureWarning(0)}>{t("Tiếp tục làm bài")}</Button></div>
+    </Modal>}
       {confirmSubmit && <Modal closeLabel={t("Đóng")} onClose={() => setConfirmSubmit(false)} title={t("Xác nhận nộp bài")}><p className="text-content-muted">{remaining > 0 ? `${t("Còn")} ${remaining} ${t("câu chưa trả lời")}.` : t("Bạn đã trả lời tất cả câu hỏi.")}</p><div className="mt-6 flex flex-wrap justify-end gap-3"><Button type="button" variant="outline" onClick={() => setConfirmSubmit(false)}>{t("Tiếp tục làm bài")}</Button><Button type="button" onClick={() => { setConfirmSubmit(false); onSubmit(); }}>{t("Nộp bài")}</Button></div></Modal>}
   </>;
 }

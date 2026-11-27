@@ -15,5 +15,6 @@ ENV HOSTNAME=0.0.0.0
 WORKDIR /workspace
 COPY --from=build /workspace/quiz-fe/.next/standalone ./
 COPY --from=build /workspace/quiz-fe/.next/static ./quiz-fe/.next/static
+COPY --from=build /workspace/quiz-fe/public ./quiz-fe/public
 EXPOSE 3000
 CMD ["node", "quiz-fe/server.js"]

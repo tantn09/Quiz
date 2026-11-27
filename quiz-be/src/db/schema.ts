@@ -114,11 +114,19 @@ export const submissions = pgTable("submissions", {
   startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
   dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
   submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  departureLimitEnabled: boolean("departure_limit_enabled").notNull().default(false),
+  departureLimitSubmitted: boolean("departure_limit_submitted").notNull().default(false),
   score: numeric("score", { precision: 8, scale: 2, mode: "number" }),
   gradingStatus: varchar("grading_status", { length: 16 }).notNull().default("pending"),
   questionSnapshot: jsonb("question_snapshot").$type<QuestionSnapshot[]>().notNull(),
   promptSnapshot: jsonb("prompt_snapshot").$type<PromptDocument>(),
 }, (table) => [uniqueIndex("submission_quiz_student_identity").on(table.quizId, table.studentNameKey, table.studentClassKey), uniqueIndex("submission_student").on(table.quizId, table.studentId)]);
+
+export const attemptDepartures = pgTable("attempt_departures", {
+  submissionId: uuid("submission_id").notNull().references(() => submissions.id, { onDelete: "cascade" }),
+  eventId: uuid("event_id").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
+}, (table) => [uniqueIndex("attempt_departures_submission_event").on(table.submissionId, table.eventId)]);
 
 export type PromptImage = { id: string; alt: string };
 export type PromptDocument = { type: "doc"; content: unknown[] };

@@ -4,7 +4,9 @@ import { and, desc, eq, ilike, inArray, isNotNull, ne, or, sql } from "drizzle-o
 import { z } from "zod";
 import { requireTeacherAccess } from "../auth.js";
 import { db } from "../db/index.js";
-import { answers, quizzes, quizVariants, submissions } from "../db/schema.js";
+import { answers, attemptDepartures, quizzes, quizVariants, submissions } from "../db/schema.js";
+
+const departureCount = sql<number>`(select count(*) from ${attemptDepartures} where ${attemptDepartures.submissionId} = ${submissions.id})`.mapWith(Number);
 
 function ownerFilter(user: { id: string; role: string }) {
   return user.role === "admin" ? undefined : eq(quizzes.teacherId, user.id);
@@ -44,7 +46,7 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
     if (!query.data.scope && query.data.className?.trim()) filters.push(eq(submissions.studentClass, query.data.className.trim()));
     if (query.data.gradingStatus) filters.push(eq(submissions.gradingStatus, query.data.gradingStatus));
     if (query.data.search) filters.push(or(ilike(submissions.studentName, `%${query.data.search}%`), ilike(submissions.studentClass, `%${query.data.search}%`), ilike(quizzes.title, `%${query.data.search}%`))!);
-    const fields = { id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title, variantCode: quizVariants.code };
+    const fields = { id: submissions.id, studentName: submissions.studentName, studentClass: submissions.studentClass, submittedAt: submissions.submittedAt, score: submissions.score, gradingStatus: submissions.gradingStatus, quizId: quizzes.id, quizTitle: quizzes.title, variantCode: quizVariants.code, departureLimitSubmitted: submissions.departureLimitSubmitted, departureCount };
     if (query.data.scope === "group") {
       if (!query.data.quizId || query.data.className === undefined) return reply.code(400).send({ error: "invalid_request" });
       const results = await db.select({
@@ -66,12 +68,12 @@ export async function resultRoutes(app: FastifyInstance): Promise<void> {
   app.get("/teacher/results/:id", { preHandler: [requireTeacherAccess] }, async (request, reply) => {
     const params = z.object({ id: z.string().uuid() }).safeParse(request.params);
     if (!params.success) return reply.code(400).send({ error: "invalid_request" });
-    const [row] = await db.select({ submission: submissions, quizTitle: quizzes.title, teacherId: quizzes.teacherId }).from(submissions)
+    const [row] = await db.select({ submission: submissions, departureCount, quizTitle: quizzes.title, teacherId: quizzes.teacherId }).from(submissions)
       .innerJoin(quizzes, eq(submissions.quizId, quizzes.id)).where(eq(submissions.id, params.data.id)).limit(1);
     if (!row || (request.authUser!.role !== "admin" && row.teacherId !== request.authUser!.id)) return reply.code(404).send({ error: "not_found" });
     const responseAnswers = await db.select().from(answers).where(eq(answers.submissionId, row.submission.id));
     const [variant] = await db.select({ code: quizVariants.code }).from(quizVariants).where(eq(quizVariants.id, row.submission.variantId!)).limit(1);
-    return { submission: { ...row.submission, quizTitle: row.quizTitle, variantCode: variant?.code, maxScore: row.submission.questionSnapshot.reduce((sum, question) => sum + question.points, 0) }, answers: responseAnswers };
+    return { submission: { ...row.submission, departureCount: row.departureCount, quizTitle: row.quizTitle, variantCode: variant?.code, maxScore: row.submission.questionSnapshot.reduce((sum, question) => sum + question.points, 0) }, answers: responseAnswers };
   });
 
   app.patch("/teacher/results/:id/grade", { preHandler: [requireTeacherAccess] }, async (request, reply) => {

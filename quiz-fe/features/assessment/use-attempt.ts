@@ -6,8 +6,31 @@ import type { JSONContent } from "@tiptap/core";
 
 export type QuizQuestion = { id: string; position: number; type: "choice" | "essay"; prompt: string; options: string[]; points: number };
 export type QuizInfo = { title: string; description: string; promptDocument?: JSONContent; subject?: string | null; gradeLevel?: string | null; assignedClass?: string | null };
-type Attempt = { id: string; dueAt: string; submitted: boolean; variantCode?: number };
-type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean };
+type Attempt = { id: string; dueAt: string; submitted: boolean; variantCode?: number; departureLimitEnabled?: boolean; departureLimitSubmitted?: boolean; departureIds?: string[] };
+type SavedState = { attemptId: string; resumeToken: string; answers: Record<string, string>; studentName?: string; studentClass?: string; finalized?: boolean; trigger?: "departure_limit" };
+type Departure = { id: string; occurredAt: string };
+const departurePrefix = (attemptId: string) => `quiz-departure:${attemptId}:`;
+
+function pendingDepartures(attemptId: string, memory: Map<string, Departure>) {
+  const prefix = departurePrefix(attemptId);
+  try {
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(prefix) || memory.has(key)) continue;
+      const occurredAt = localStorage.getItem(key);
+      if (occurredAt) memory.set(key, { id: key.slice(prefix.length), occurredAt });
+    }
+  } catch { /* The in-memory queue still works. */ }
+  return [...memory].filter(([key]) => key.startsWith(prefix)).map(([, event]) => event);
+}
+
+function acknowledgeDepartures(attemptId: string, events: Departure[], memory: Map<string, Departure>) {
+  for (const { id } of events) {
+    const key = departurePrefix(attemptId) + id;
+    memory.delete(key);
+    try { localStorage.removeItem(key); } catch { /* The server deduplicates retries. */ }
+  }
+}
 
 const retryDelays = [2000, 5000, 10000];
 
@@ -42,12 +65,15 @@ export function useAttempt() {
   const retrySubmissionRef = useRef<() => void>(() => {});
 
   const latestAnswers = useRef<Record<string, string>>({});
+  const confirmedDepartures = useRef<string[]>([]);
+  const [departureLimitSubmitted, setDepartureLimitSubmitted] = useState(false);
+  const departureQueue = useRef(new Map<string, Departure>());
+  const serverClockOffset = useRef(0);
   const activeSave = useRef<string | null>(null);
   const finalizedRef = useRef(false);
   const acknowledged = useRef<Record<string, string>>({});
   const saveFailure = useRef(false);
   const storageKey = useMemo(() => `quiz-attempt:${token}`, [token]);
-
   const loadAttempt = useCallback(async (state: SavedState, signal: AbortSignal) => {
     const response = await fetch(`/api/public/attempts/${state.attemptId}`, { headers: { "x-resume-token": state.resumeToken }, cache: "no-store", signal });
     if (response.status === 401) return false;
@@ -59,7 +85,18 @@ export function useAttempt() {
     acknowledged.current = payload.answers;
     latestAnswers.current = { ...payload.answers, ...state.answers };
     setAnswers(latestAnswers.current);
-    setAttempt(payload.attempt);
+    const departureIds: string[] = payload.attempt.departureIds ?? [];
+    confirmedDepartures.current = departureIds;
+    setDepartureLimitSubmitted(Boolean(payload.attempt.departureLimitSubmitted));
+    const pending = pendingDepartures(state.attemptId, departureQueue.current);
+    acknowledgeDepartures(state.attemptId, pending.filter(({ id }) => departureIds.includes(id)), departureQueue.current);
+    if (!state.finalized && !payload.attempt.submitted && payload.attempt.departureLimitEnabled &&
+      new Set([...departureIds, ...pending.map(({ id }) => id)]).size >= 3) {
+      state = { ...state, answers: latestAnswers.current, finalized: true, trigger: "departure_limit" };
+      saveAttempt(storageKey, state);
+    }
+    serverClockOffset.current = typeof payload.serverNow === "string" ? Date.parse(payload.serverNow) - Date.now() : 0;
+    setAttempt({ ...payload.attempt, dueAt: new Date(Date.parse(payload.attempt.dueAt) - serverClockOffset.current).toISOString() });
     setSaved(state);
     setName(state.studentName ?? "");
     setClassName(state.studentClass ?? "");
@@ -69,7 +106,7 @@ export function useAttempt() {
       setFinalized(state);
     }
     return true;
-  }, [t]);
+  }, [storageKey, t]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,14 +149,27 @@ export function useAttempt() {
     };
   }, [loadAttempt, storageKey, token, showError, t]);
 
-  const submitLatest = useCallback(() => {
+  const finalizeLatest = useCallback((trigger?: "departure_limit") => {
     if (!saved || done || finalizedRef.current) return;
     finalizedRef.current = true;
-    const state = { ...saved, answers: latestAnswers.current, finalized: true };
+    const state = { ...saved, answers: latestAnswers.current, finalized: true, trigger };
     setPersisted(saveAttempt(storageKey, state));
     setDone(true);
     setFinalized(state);
   }, [done, saved, storageKey]);
+  const submitLatest = useCallback(() => finalizeLatest(), [finalizeLatest]);
+  const recordDeparture = useCallback(() => {
+    if (!saved || finalizedRef.current) return 0;
+    const id = crypto.randomUUID();
+    const occurredAt = new Date(Date.now() + serverClockOffset.current).toISOString();
+    const key = departurePrefix(saved.attemptId) + id;
+    departureQueue.current.set(key, { id, occurredAt });
+    try { localStorage.setItem(key, occurredAt); } catch { /* Keep the event in memory. */ }
+    const pending = pendingDepartures(saved.attemptId, departureQueue.current);
+    const count = new Set([...confirmedDepartures.current, ...pending.map((event) => event.id)]).size;
+    if (attempt?.departureLimitEnabled && count >= 3) finalizeLatest("departure_limit");
+    return count;
+  }, [attempt?.departureLimitEnabled, finalizeLatest, saved]);
 
   useEffect(() => {
     if (!saved || done || finalizedRef.current) return;
@@ -133,7 +183,8 @@ export function useAttempt() {
     const sync = () => {
       if (closed || finalizedRef.current || activeSave.current === saved.attemptId || !navigator.onLine) return;
       const changes = Object.fromEntries(Object.entries(latestAnswers.current).filter(([id, value]) => acknowledged.current[id] !== value));
-      if (!Object.keys(changes).length) return;
+      const departures = pendingDepartures(saved.attemptId, departureQueue.current);
+      if (!Object.keys(changes).length && !departures.length) return;
       activeSave.current = saved.attemptId;
       const reportFailure = () => {
         if (!active) return;
@@ -141,10 +192,17 @@ export function useAttempt() {
         saveFailure.current = true;
       };
       void fetch(`/api/public/attempts/${saved.attemptId}/answers`, {
-        method: "PUT", headers: { "content-type": "application/json", "x-resume-token": saved.resumeToken }, body: JSON.stringify({ answers: changes }),
-      }).then((response) => {
+        method: "PUT", headers: { "content-type": "application/json", "x-resume-token": saved.resumeToken }, body: JSON.stringify({ answers: changes, departures }),
+      }).then(async (response) => {
+        const payload = await response.json().catch(() => null);
+        if (active && (payload?.departureLimitSubmitted || payload?.error === "already_submitted")) {
+          setDepartureLimitSubmitted(Boolean(payload.departureLimitSubmitted));
+          setDone(true);
+        }
         if (response.ok) {
+          acknowledgeDepartures(saved.attemptId, departures, departureQueue.current);
           if (active) {
+            confirmedDepartures.current = payload?.departureIds ?? confirmedDepartures.current;
             Object.assign(acknowledged.current, changes);
             saveFailure.current = false;
           }
@@ -155,8 +213,15 @@ export function useAttempt() {
       });
     };
     const interval = window.setInterval(sync, 5000);
+    const syncOnReturn = () => { if (!document.hidden) sync(); };
+    document.addEventListener("visibilitychange", syncOnReturn);
     window.addEventListener("online", sync);
-    return () => { active = false; window.clearInterval(interval); window.removeEventListener("online", sync); };
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", syncOnReturn);
+      window.removeEventListener("online", sync);
+    };
   }, [done, saved, showError, t]);
 
   useEffect(() => {
@@ -174,16 +239,31 @@ export function useAttempt() {
       if (!navigator.onLine) { setSubmissionStatus("waiting"); return; }
       sending = true;
       setSubmissionStatus("sending");
+      const departures = pendingDepartures(state.attemptId, departureQueue.current);
       try {
         const response = await fetch(`/api/public/attempts/${state.attemptId}/submit`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-resume-token": state.resumeToken },
-          body: JSON.stringify({ answers: state.answers }),
+          body: JSON.stringify({ answers: state.answers, departures, trigger: state.trigger }),
           signal: controller.signal,
         });
-        const duplicate = response.status === 409 && (await response.json().catch(() => null))?.error === "already_submitted";
+        const payload = await response.json().catch(() => null);
+        const duplicate = response.status === 409 && payload?.error === "already_submitted";
         if (controller.signal.aborted) return;
+        if (payload?.error === "departure_limit_not_reached") {
+          confirmedDepartures.current = payload.departureIds;
+          acknowledgeDepartures(state.attemptId, departures, departureQueue.current);
+          finalizedRef.current = false;
+          const resumed = { ...state, finalized: false, trigger: undefined };
+          setPersisted(saveAttempt(storageKey, resumed));
+          setSaved(resumed);
+          setFinalized(null);
+          setDone(false);
+          return;
+        }
         if (response.ok || duplicate) {
+          setDepartureLimitSubmitted(Boolean(payload?.departureLimitSubmitted));
+          acknowledgeDepartures(state.attemptId, departures, departureQueue.current);
           terminal = true;
           setSubmissionStatus("sent");
           return;
@@ -220,7 +300,7 @@ export function useAttempt() {
       window.removeEventListener("online", retry);
       retrySubmissionRef.current = () => {};
     };
-  }, [finalized]);
+  }, [finalized, storageKey]);
 
   const [unlisted, setUnlisted] = useState(false);
   const [requestStatus, setRequestStatus] = useState("");
@@ -279,7 +359,9 @@ export function useAttempt() {
       const state: SavedState = { attemptId: payload.attempt.id, resumeToken: payload.resumeToken, answers: {}, studentName: name, studentClass: quiz?.assignedClass ?? className };
       setPersisted(saveAttempt(storageKey, state));
       setSaved(state);
-      setAttempt({ ...payload.attempt, submitted: false });
+      confirmedDepartures.current = [];
+      serverClockOffset.current = typeof payload.serverNow === "string" ? Date.parse(payload.serverNow) - Date.now() : 0;
+      setAttempt({ ...payload.attempt, dueAt: new Date(Date.parse(payload.attempt.dueAt) - serverClockOffset.current).toISOString(), submitted: false });
       setQuiz({ title: payload.quiz.title, description: "", promptDocument: payload.quiz.prompt ?? { type: "doc", content: [] } });
       setQuestions(payload.questions);
     } catch (reason) {
@@ -294,5 +376,5 @@ export function useAttempt() {
     setAnswers(latestAnswers.current);
   }
 
-  return { quiz, questions, attempt, name, setName, className, setClassName, answers, loading, busy, done, submissionStatus: finalized ? submissionStatus : "sent", persisted, retrySubmission: () => retrySubmissionRef.current(), unlisted, setUnlisted, requestStatus, requestAccess, start, setAnswer, submitLatest };
+  return { quiz, questions, attempt, name, setName, className, setClassName, answers, loading, busy, done, submissionStatus: finalized ? submissionStatus : "sent", persisted, retrySubmission: () => retrySubmissionRef.current(), unlisted, setUnlisted, requestStatus, requestAccess, start, setAnswer, submitLatest, recordDeparture, departureLimitSubmitted, departureLimitPending: finalized?.trigger === "departure_limit" && submissionStatus !== "sent" };
 }
